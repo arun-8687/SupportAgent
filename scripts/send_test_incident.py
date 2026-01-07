@@ -6,10 +6,18 @@ Usage:
     python scripts/send_test_incident.py [--api-url URL] [--scenario SCENARIO]
 
 Scenarios:
+    # SQL Server scenarios
+    deadlock     - SQL Server deadlock (Error 1205)
+    lock_timeout - SQL Server lock timeout (Error 1222)
+    sql_auth     - SQL authentication failure
+
+    # Databricks scenarios
     oom          - OutOfMemoryError (common)
     connection   - Connection timeout (transient)
     data         - Data quality error
     config       - Configuration error
+
+    # Generic
     unknown      - Unknown error (escalation test)
 """
 import argparse
@@ -22,6 +30,103 @@ import requests
 
 # Test scenarios
 SCENARIOS = {
+    # =========================================================================
+    # SQL Server Scenarios
+    # =========================================================================
+    "deadlock": {
+        "job_name": "usp_ProcessDailyOrders",
+        "job_type": "sql_server",
+        "source_system": "Azure-SQL-EastUS",
+        "environment": "prod",
+        "error_message": "Transaction (Process ID 58) was deadlocked on lock resources with another process and has been chosen as the deadlock victim. Rerun the transaction.",
+        "error_code": "1205",
+        "stack_trace": """
+Msg 1205, Level 13, State 51, Procedure usp_ProcessDailyOrders, Line 45
+Transaction (Process ID 58) was deadlocked on lock | lock resources with another process and has been chosen as the deadlock victim. Rerun the transaction.
+
+Deadlock victim:
+  SPID: 58
+  Lock type: KEY
+  Resource: dbo.Orders (clustered index)
+  Mode: X
+  Owner: UPDATE statement at line 45
+
+Blocking:
+  SPID: 62
+  Lock type: KEY
+  Resource: dbo.OrderItems (clustered index)
+  Mode: X
+        """,
+        "priority_hint": "P2",
+        "affected_tables": ["dbo.Orders", "dbo.OrderItems"],
+        "metadata": {
+            "database": "SalesDB",
+            "procedure_schema": "dbo",
+            "spid": 58,
+            "blocking_spid": 62
+        }
+    },
+    "lock_timeout": {
+        "job_name": "usp_UpdateInventory",
+        "job_type": "sql_server",
+        "source_system": "Azure-SQL-WestUS",
+        "environment": "prod",
+        "error_message": "Lock request time out period exceeded. The statement has been terminated.",
+        "error_code": "1222",
+        "stack_trace": """
+Msg 1222, Level 16, State 51, Procedure usp_UpdateInventory, Line 23
+Lock request time out period exceeded. The statement has been terminated.
+
+Blocked Query:
+  UPDATE Inventory SET Quantity = Quantity - @OrderQty
+  WHERE ProductID = @ProductID
+
+Blocking Session Info:
+  Session ID: 87
+  Wait Time: 30001 ms
+  Wait Type: LCK_M_U
+  Blocking Session: 45
+  Database: InventoryDB
+        """,
+        "priority_hint": "P2",
+        "affected_tables": ["dbo.Inventory"],
+        "metadata": {
+            "database": "InventoryDB",
+            "blocking_session_id": 45,
+            "wait_time_ms": 30001
+        }
+    },
+    "sql_auth": {
+        "job_name": "etl_nightly_sync",
+        "job_type": "sql_server",
+        "source_system": "Azure-SQL-EastUS",
+        "environment": "uat",
+        "error_message": "Login failed for user 'svc_etl_user'. Reason: Password did not match that for the login provided.",
+        "error_code": "18456",
+        "priority_hint": "P2",
+        "metadata": {
+            "database": "ReportingDB",
+            "login_user": "svc_etl_user"
+        }
+    },
+    "sql_log_full": {
+        "job_name": "usp_ArchiveTransactions",
+        "job_type": "sql_server",
+        "source_system": "Azure-SQL-EastUS",
+        "environment": "prod",
+        "error_message": "The transaction log for database 'TransactionDB' is full due to 'ACTIVE_TRANSACTION'.",
+        "error_code": "9002",
+        "priority_hint": "P1",
+        "affected_tables": ["dbo.Transactions", "dbo.TransactionArchive"],
+        "metadata": {
+            "database": "TransactionDB",
+            "log_reuse_wait": "ACTIVE_TRANSACTION"
+        }
+    },
+
+    # =========================================================================
+    # Databricks Scenarios
+    # =========================================================================
     "oom": {
         "job_name": "etl-customer-data-daily",
         "job_type": "databricks",
@@ -67,9 +172,13 @@ Caused by: java.lang.OutOfMemoryError: Java heap space
         "error_code": "SNOWFLAKE_AUTH_FAILED",
         "priority_hint": "P2"
     },
+
+    # =========================================================================
+    # Generic / Unknown
+    # =========================================================================
     "unknown": {
         "job_name": "mystery-batch-processor",
-        "job_type": "databricks",
+        "job_type": "custom",
         "source_system": "Azure-EastUS",
         "environment": "prod",
         "error_message": "Unexpected error occurred during execution: [INTERNAL_ERROR] Something went wrong, please contact support.",

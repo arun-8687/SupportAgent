@@ -59,7 +59,16 @@ class Settings(BaseSettings):
     databricks_host: str = ""
     databricks_token: str = ""
 
-    # SQL Server
+    # SQL Server / Azure SQL
+    sql_server_connection_string: str = ""  # Full connection string (takes precedence)
+    sql_server_host: str = ""
+    sql_server_database: str = ""
+    sql_server_user: str = ""
+    sql_server_password: str = ""
+    sql_server_driver: str = "ODBC Driver 18 for SQL Server"
+    sql_server_encrypt: bool = True
+
+    # Legacy SQL Server settings (for backward compatibility)
     sqlserver_app_connection_string: str = ""
     sqlserver_metadata_connection_string: str = ""
 

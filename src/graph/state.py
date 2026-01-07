@@ -62,7 +62,7 @@ class Incident(BaseModel):
     """Core incident data from source systems."""
     incident_id: str
     job_name: str
-    job_type: Literal["iws", "databricks", "adf", "webapp", "api", "custom"]
+    job_type: str  # Generic: "databricks", "sql_server", "azure_sql", "adf", "api", etc.
     source_system: str
     environment: Literal["prod", "uat", "dev"]
 

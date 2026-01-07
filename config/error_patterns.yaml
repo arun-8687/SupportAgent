@@ -1,0 +1,278 @@
+# Error Pattern Configuration
+# Defines error patterns, their categories, and remediation hints
+# Patterns are matched in order - first match wins
+
+version: "1.0"
+
+# Global patterns (apply to all platforms)
+global:
+  - pattern: "OutOfMemory|OOM|heap space|memory exhausted"
+    category: "infrastructure"
+    issue_type: "memory_exhaustion"
+    severity: "P2"
+    remediation_hint: "scale_resources"
+    auto_remediable: true
+
+  - pattern: "timeout|timed out|deadline exceeded"
+    category: "infrastructure"
+    issue_type: "timeout"
+    severity: "P3"
+    remediation_hint: "retry_or_extend_timeout"
+    auto_remediable: true
+
+  - pattern: "connection refused|cannot connect|connection reset"
+    category: "integration"
+    issue_type: "connection_failure"
+    severity: "P2"
+    remediation_hint: "check_connectivity"
+    auto_remediable: false
+
+  - pattern: "permission denied|access denied|unauthorized|403|401"
+    category: "application"
+    issue_type: "permission_error"
+    severity: "P2"
+    remediation_hint: "check_permissions"
+    auto_remediable: false
+
+  - pattern: "disk full|no space left|storage quota"
+    category: "infrastructure"
+    issue_type: "storage_exhaustion"
+    severity: "P1"
+    remediation_hint: "clear_storage"
+    auto_remediable: true
+
+# SQL Server specific patterns
+sql_server:
+  - pattern: "deadlock victim|Error 1205"
+    category: "data_pipeline"
+    issue_type: "deadlock"
+    severity: "P2"
+    remediation_hint: "retry_transaction"
+    auto_remediable: true
+    details:
+      sql_error_code: 1205
+      is_transient: true
+
+  - pattern: "lock request time out|Error 1222"
+    category: "data_pipeline"
+    issue_type: "lock_timeout"
+    severity: "P2"
+    remediation_hint: "kill_blocking_session"
+    auto_remediable: true
+    details:
+      sql_error_code: 1222
+      is_transient: true
+
+  - pattern: "cannot open database|Error 4060"
+    category: "integration"
+    issue_type: "database_unavailable"
+    severity: "P1"
+    remediation_hint: "check_database_status"
+    auto_remediable: false
+    details:
+      sql_error_code: 4060
+
+  - pattern: "login failed|Error 18456"
+    category: "application"
+    issue_type: "authentication_failure"
+    severity: "P2"
+    remediation_hint: "check_credentials"
+    auto_remediable: false
+    details:
+      sql_error_code: 18456
+
+  - pattern: "transaction log.*full|Error 9002"
+    category: "infrastructure"
+    issue_type: "log_full"
+    severity: "P1"
+    remediation_hint: "backup_transaction_log"
+    auto_remediable: true
+    details:
+      sql_error_code: 9002
+
+  - pattern: "arithmetic overflow|Error 8115"
+    category: "data_pipeline"
+    issue_type: "data_error"
+    severity: "P3"
+    remediation_hint: "fix_data_types"
+    auto_remediable: false
+    details:
+      sql_error_code: 8115
+
+  - pattern: "string or binary data would be truncated|Error 8152"
+    category: "data_pipeline"
+    issue_type: "data_truncation"
+    severity: "P3"
+    remediation_hint: "fix_column_sizes"
+    auto_remediable: false
+    details:
+      sql_error_code: 8152
+
+  - pattern: "constraint violation|FOREIGN KEY|PRIMARY KEY|UNIQUE"
+    category: "data_pipeline"
+    issue_type: "constraint_violation"
+    severity: "P3"
+    remediation_hint: "fix_data_integrity"
+    auto_remediable: false
+
+  - pattern: "query processor.*resources|Error 701"
+    category: "infrastructure"
+    issue_type: "query_memory"
+    severity: "P2"
+    remediation_hint: "optimize_query"
+    auto_remediable: false
+    details:
+      sql_error_code: 701
+
+# Azure SQL specific patterns
+azure_sql:
+  - pattern: "DTU limit|resource limit|Error 10928"
+    category: "infrastructure"
+    issue_type: "resource_limit"
+    severity: "P2"
+    remediation_hint: "scale_database"
+    auto_remediable: true
+    details:
+      sql_error_code: 10928
+
+  - pattern: "serverless.*paused|Error 40613"
+    category: "infrastructure"
+    issue_type: "serverless_pause"
+    severity: "P3"
+    remediation_hint: "retry_connection"
+    auto_remediable: true
+    details:
+      sql_error_code: 40613
+      is_transient: true
+
+# Databricks specific patterns
+databricks:
+  - pattern: "SPARK_OOM|Java heap space|OutOfMemoryError"
+    category: "infrastructure"
+    issue_type: "spark_oom"
+    severity: "P2"
+    remediation_hint: "scale_cluster"
+    auto_remediable: true
+
+  - pattern: "cluster.*terminated|ClusterNotFound"
+    category: "infrastructure"
+    issue_type: "cluster_terminated"
+    severity: "P2"
+    remediation_hint: "restart_cluster"
+    auto_remediable: true
+
+  - pattern: "SCHEMA_MISMATCH|cannot resolve"
+    category: "data_pipeline"
+    issue_type: "schema_mismatch"
+    severity: "P2"
+    remediation_hint: "check_schema"
+    auto_remediable: false
+
+  - pattern: "FileNotFoundException|Path does not exist"
+    category: "data_pipeline"
+    issue_type: "missing_data"
+    severity: "P2"
+    remediation_hint: "check_data_source"
+    auto_remediable: false
+
+# Azure Data Factory patterns
+adf:
+  - pattern: "UserErrorInvalidPipelinePayload"
+    category: "application"
+    issue_type: "pipeline_config_error"
+    severity: "P3"
+    remediation_hint: "check_pipeline_config"
+    auto_remediable: false
+
+  - pattern: "IntegrationRuntimeNotAvailable"
+    category: "infrastructure"
+    issue_type: "ir_unavailable"
+    severity: "P2"
+    remediation_hint: "restart_integration_runtime"
+    auto_remediable: true
+
+# API/Web service patterns
+api:
+  - pattern: "5[0-9]{2}.*error|internal server error"
+    category: "application"
+    issue_type: "server_error"
+    severity: "P2"
+    remediation_hint: "check_application_logs"
+    auto_remediable: false
+
+  - pattern: "rate limit|429|too many requests"
+    category: "integration"
+    issue_type: "rate_limited"
+    severity: "P3"
+    remediation_hint: "retry_with_backoff"
+    auto_remediable: true
+    details:
+      is_transient: true
+
+# Remediation action definitions per platform
+remediation_actions:
+  sql_server:
+    - name: "retry_procedure"
+      display_name: "Retry Stored Procedure"
+      description: "Re-execute the failed stored procedure"
+      risk_level: "low"
+      supports_rollback: false
+      params:
+        - name: "procedure_name"
+          type: "string"
+          required: true
+        - name: "max_retries"
+          type: "integer"
+          required: false
+          default: 3
+
+    - name: "kill_session"
+      display_name: "Kill Blocking Session"
+      description: "Terminate a blocking database session"
+      risk_level: "medium"
+      supports_rollback: false
+      params:
+        - name: "session_id"
+          type: "integer"
+          required: true
+
+    - name: "get_deadlock_graph"
+      display_name: "Get Deadlock Graph"
+      description: "Retrieve the deadlock graph for analysis"
+      risk_level: "low"
+      supports_rollback: false
+      params: []
+
+    - name: "clear_plan_cache"
+      display_name: "Clear Plan Cache"
+      description: "Clear the query plan cache for a procedure"
+      risk_level: "low"
+      supports_rollback: false
+      params:
+        - name: "procedure_name"
+          type: "string"
+          required: false
+
+  databricks:
+    - name: "restart_job"
+      display_name: "Restart Failed Job"
+      description: "Restart the failed Databricks job"
+      risk_level: "low"
+      supports_rollback: false
+      params:
+        - name: "job_id"
+          type: "string"
+          required: true
+
+    - name: "scale_cluster"
+      display_name: "Scale Cluster"
+      description: "Increase cluster size for memory issues"
+      risk_level: "medium"
+      supports_rollback: true
+      params:
+        - name: "cluster_id"
+          type: "string"
+          required: true
+        - name: "num_workers"
+          type: "integer"
+          required: true
