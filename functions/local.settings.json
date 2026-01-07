@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "SERVICEBUS_CONNECTION": "<your-servicebus-connection-string>",
+    "SUPPORT_AGENT_URL": "https://app-support-agent-dev.azurewebsites.net",
+    "SUPPORT_AGENT_API_KEY": "<your-api-key>",
+    "ENVIRONMENT": "dev"
+  }
+}

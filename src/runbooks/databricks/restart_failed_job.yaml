@@ -1,0 +1,199 @@
+# Runbook: Restart Failed Databricks Job
+# Version: 1.0
+# Description: Restart a failed Databricks job with optional parameter adjustments
+
+name: restart_failed_databricks_job
+display_name: "Restart Failed Databricks Job"
+description: |
+  Automatically restart a failed Databricks job after validating
+  cluster health and clearing any stale caches.
+
+version: "1.0"
+author: "Support Agent"
+issue_type: databricks
+category: data_pipeline
+
+# When to auto-apply this runbook
+triggers:
+  - issue_type: databricks
+    error_patterns:
+      - "SparkException: Job aborted"
+      - "ClusterTerminatedException"
+      - "RESOURCE_DOES_NOT_EXIST"
+      - "Task failed while writing"
+      - "Stage cancelled because SparkContext was shut down"
+    auto_apply: true
+    confidence_threshold: 0.8
+    exclude_patterns:
+      - "OutOfMemoryError"  # These need different handling
+      - "PermissionDenied"  # These need human review
+
+# Input parameters (from incident context)
+inputs:
+  job_id:
+    type: string
+    source: "incident.job_name"
+    required: true
+  run_id:
+    type: string
+    source: "incident.job_run_id"
+    required: true
+  cluster_id:
+    type: string
+    source: "incident.cluster_id"
+    required: false
+  notebook_params:
+    type: object
+    source: "incident.metadata.notebook_params"
+    required: false
+    default: {}
+
+# Pre-conditions to check before execution
+preconditions:
+  - name: "Check cluster is available"
+    tool: get_cluster_status
+    params:
+      cluster_id: "{{ cluster_id }}"
+    expect:
+      state:
+        - RUNNING
+        - PENDING
+        - RESIZING
+    on_fail: wait_for_cluster
+    wait_timeout_minutes: 10
+
+  - name: "Check job is not already running"
+    tool: get_job_run_status
+    params:
+      run_id: "{{ run_id }}"
+    expect:
+      state:
+        - FAILED
+        - TERMINATED
+        - CANCELLED
+    on_fail: skip  # Job already running
+
+# Remediation steps
+steps:
+  - name: "Get current job configuration"
+    tool: get_job_details
+    params:
+      job_id: "{{ job_id }}"
+    save_as: job_config
+    rollback: false
+    description: "Retrieve current job settings for restart"
+
+  - name: "Check for cache issues"
+    condition: "'cache' in incident.error_message.lower() or 'stale' in incident.error_message.lower()"
+    tool: clear_spark_cache
+    params:
+      cluster_id: "{{ cluster_id }}"
+    rollback: false
+    description: "Clear Spark cache if cache-related error"
+
+  - name: "Wait for cluster if needed"
+    condition: "cluster_status.state == 'PENDING'"
+    tool: wait_for_cluster
+    params:
+      cluster_id: "{{ cluster_id }}"
+      timeout_minutes: 15
+    rollback: false
+    description: "Wait for cluster to become available"
+
+  - name: "Restart the job"
+    tool: restart_databricks_job
+    params:
+      job_id: "{{ job_id }}"
+      notebook_params: "{{ notebook_params or job_config.default_params }}"
+    save_as: restart_result
+    rollback: true  # Can cancel if verification fails
+    description: "Start a new run of the failed job"
+
+  - name: "Wait for job to start"
+    tool: wait_for_job_start
+    params:
+      run_id: "{{ restart_result.run_id }}"
+      timeout_minutes: 5
+    save_as: job_start_status
+    rollback: false
+    description: "Wait for job run to initialize"
+
+# Verification after execution
+verification:
+  - name: "Check job is running"
+    tool: get_job_run_status
+    params:
+      run_id: "{{ restart_result.run_id }}"
+    expect:
+      state:
+        - RUNNING
+        - PENDING
+    on_fail: rollback_and_retry
+
+  - name: "Wait for completion (optional)"
+    condition: "config.wait_for_completion == true"
+    tool: wait_for_job
+    params:
+      run_id: "{{ restart_result.run_id }}"
+      timeout_minutes: "{{ config.max_wait_minutes or 60 }}"
+    expect:
+      state: SUCCESS
+    on_fail: escalate
+
+# Rollback plan
+rollback:
+  - name: "Cancel restarted job"
+    tool: cancel_databricks_run
+    params:
+      run_id: "{{ restart_result.run_id }}"
+    description: "Cancel the restarted job run"
+
+# Actions on success
+on_success:
+  - action: close_incident
+    params:
+      resolution: |
+        Job {{ job_id }} restarted successfully.
+        New run ID: {{ restart_result.run_id }}
+        Previous error: {{ incident.error_message[:200] }}
+
+  - action: update_knowledge_base
+    params:
+      pattern: "{{ incident.error_message }}"
+      solution: "restart_job"
+      success: true
+
+  - action: notify
+    params:
+      channel: "{{ incident.owner_team or 'support' }}"
+      message: |
+        Job {{ job_id }} was automatically restarted after failure.
+        New run: {{ restart_result.run_id }}
+
+# Actions on failure
+on_failure:
+  - action: escalate_to_human
+    params:
+      priority: P2
+      context: |
+        Automated restart failed for job {{ job_id }}.
+        Original error: {{ incident.error_message[:500] }}
+        Restart attempt: {{ restart_result.run_id or 'not started' }}
+        Rollback status: {{ rollback_result.status or 'not performed' }}
+
+  - action: update_knowledge_base
+    params:
+      pattern: "{{ incident.error_message }}"
+      solution: "restart_job"
+      success: false
+
+# Metadata
+metadata:
+  estimated_duration_minutes: 5
+  risk_level: low
+  requires_approval: false
+  tags:
+    - databricks
+    - restart
+    - transient-failure
+  documentation_url: "https://docs.company.com/runbooks/databricks-restart"

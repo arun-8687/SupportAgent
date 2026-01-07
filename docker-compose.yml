@@ -1,0 +1,109 @@
+# Docker Compose for local development and testing
+# For production, use Azure Container Apps or Kubernetes
+
+version: '3.8'
+
+services:
+  # Main Support Agent API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: support-agent-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/supportagent
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_DEPLOYMENT=gpt-5.1-codex
+      - AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
+      - AZURE_AI_SEARCH_ENDPOINT=${AZURE_AI_SEARCH_ENDPOINT}
+      - AZURE_AI_SEARCH_KEY=${AZURE_AI_SEARCH_KEY}
+      - DATABRICKS_HOST=${DATABRICKS_HOST}
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=support-agent-dev
+      - API_KEYS=dev-api-key-12345
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - support-agent-network
+
+  # PostgreSQL with pgvector for vector storage
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: support-agent-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=supportagent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d supportagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - support-agent-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: support-agent-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - support-agent-network
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: support-agent-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - support-agent-network
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  support-agent-network:
+    driver: bridge
