@@ -410,7 +410,7 @@ def create_app() -> FastAPI:
                 status_code=500,
                 content={
                     "status": "error",
-                    "message": f"LangSmith trace failed: {str(e)}",
+                    "message": "LangSmith trace failed. Check server logs for details.",
                     "project": os.getenv("LANGCHAIN_PROJECT", "not set")
                 }
             )

@@ -115,7 +115,7 @@ async def get_incident_status(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error getting incident status: {e}", exc_info=True)
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "An internal server error occurred"}),
             status_code=500,
             mimetype="application/json"
         )
@@ -169,7 +169,7 @@ async def approve_remediation(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error submitting approval: {e}", exc_info=True)
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "An internal server error occurred"}),
             status_code=500,
             mimetype="application/json"
         )
@@ -220,7 +220,7 @@ async def submit_incident(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error submitting incident: {e}", exc_info=True)
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "An internal server error occurred"}),
             status_code=500,
             mimetype="application/json"
         )
@@ -246,7 +246,7 @@ async def list_pending_approvals(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error listing pending approvals: {e}", exc_info=True)
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "An internal server error occurred"}),
             status_code=500,
             mimetype="application/json"
         )
@@ -272,7 +272,7 @@ async def get_metrics(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error getting metrics: {e}", exc_info=True)
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
+            json.dumps({"error": "An internal server error occurred"}),
             status_code=500,
             mimetype="application/json"
         )
