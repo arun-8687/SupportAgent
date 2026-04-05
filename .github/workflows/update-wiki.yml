@@ -23,22 +23,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
-      - name: Install and authenticate Copilot CLI
-        env:
-          COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+      - name: Install Copilot CLI
         run: |
-          # Install the Copilot CLI (package is @githubnext/github-copilot-cli)
-          npm install -g @githubnext/github-copilot-cli 2>/dev/null || \
-          npm install -g @githubnext/copilot-cli 2>/dev/null || true
-          # Authenticate with the PAT
-          if command -v copilot &>/dev/null; then
-            echo "$COPILOT_TOKEN" | copilot auth login --with-token 2>/dev/null || true
-            echo "Copilot CLI authenticated"
-          else
-            echo "Copilot CLI not available, will use GitHub Models API fallback"
-          fi
+          # @github/copilot requires Node.js v24+
+          npm install -g @github/copilot
+          copilot --version || echo "Copilot CLI installed"
 
       - name: Checkout wiki
         run: |
@@ -67,7 +58,7 @@ jobs:
 
       - name: Update wiki pages with Copilot
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.COPILOT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
         run: |
           bash scripts/update-wiki-pages.sh /tmp/pr_diff.txt /tmp/mapping.json wiki "${{ github.event.pull_request.title }}" "${{ github.event.pull_request.number }}"

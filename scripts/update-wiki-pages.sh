@@ -33,10 +33,11 @@ call_llm() {
   local prompt="$1"
   local result=""
 
-  # Try 1: copilot -p (Copilot CLI)
+  # Try 1: copilot -p (new @github/copilot CLI, auth via GH_TOKEN env var)
   if command -v copilot &>/dev/null; then
-    result=$(echo "$prompt" | copilot -p 2>/dev/null) && { echo "$result"; return 0; }
-    echo "WARN: copilot -p failed, trying fallback..." >&2
+    result=$(copilot -p "$prompt" --allow-all-tools 2>/dev/null) && \
+      [[ ${#result} -gt 50 ]] && { echo "$result"; return 0; }
+    echo "WARN: copilot -p failed or returned empty, trying fallback..." >&2
   fi
 
   # Try 2: GitHub Models REST API (uses GITHUB_TOKEN with models:read permission)
