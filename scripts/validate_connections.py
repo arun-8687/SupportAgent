@@ -36,7 +36,7 @@ def sanitize_message(message: str) -> str:
     return sanitized
 
 
-def print_status(name: str, success: bool, message: str = ""):
+def print_status(success: bool, message: str = "", details: str = ""):
     """Print status with color."""
     if success:
         status = "\033[92m✓ PASS\033[0m"
@@ -44,13 +44,12 @@ def print_status(name: str, success: bool, message: str = ""):
         status = "\033[91m✗ FAIL\033[0m"
 
     print(f"  {status}")
-    if name:
-        sanitized_name = sanitize_message(name)
-        print(f"         {sanitized_name}")
     if message:
-        # Sanitize the message to avoid logging sensitive information
-        sanitized = sanitize_message(message)
-        print(f"         {sanitized}")
+        sanitized_message = sanitize_message(message)
+        print(f"         {sanitized_message}")
+    if details:
+        sanitized_details = sanitize_message(details)
+        print(f"         {sanitized_details}")
 
 
 async def test_settings():
@@ -62,7 +61,7 @@ async def test_settings():
         from src.integrations.config import get_settings
         settings = get_settings()
 
-        print_status("Settings loaded", True)
+        print_status(True, "Settings loaded")
         print(f"         Environment: {settings.environment}")
 
         # Check required settings
@@ -78,16 +77,16 @@ async def test_settings():
         for name, value in required:
             is_set = bool(value)
             if not is_set:
-                print_status(f"  {name}", False, "Not configured")
+                print_status(False, name, "Not configured")
                 all_set = False
 
         if all_set:
-            print_status("All required settings", True)
+            print_status(True, "All required settings")
 
         return all_set
 
     except Exception as e:
-        print_status("Settings", False, str(e))
+        print_status(False, "Settings", str(e))
         return False
 
 
@@ -100,7 +99,7 @@ async def test_azure_openai():
         from src.integrations.llm_client import get_llm_client
 
         client = get_llm_client()
-        print_status("Client initialized", True)
+        print_status(True, "Client initialized")
 
         # Test chat completion
         response = await client.chat_completion(
@@ -109,15 +108,15 @@ async def test_azure_openai():
         )
 
         if response and "Hello" in response:
-            print_status("Chat completion", True, f"Response: {response[:60]}...")
+            print_status(True, "Chat completion", f"Response: {response[:60]}...")
         else:
-            print_status("Chat completion", False, f"Unexpected response: {response[:60]}...")
+            print_status(False, "Chat completion", f"Unexpected response: {response[:60]}...")
             return False
 
         return True
 
     except Exception as e:
-        print_status("Azure OpenAI", False, str(e))
+        print_status(False, "Azure OpenAI", str(e))
         return False
 
 
@@ -130,24 +129,24 @@ async def test_embeddings():
         from src.integrations.llm_client import get_embedding_client
 
         client = get_embedding_client()
-        print_status("Embedding client initialized", True)
+        print_status(True, "Embedding client initialized")
 
         # Test embedding
         embedding = await client.embed_text("Test incident: OutOfMemoryError in Spark job")
 
         if embedding and len(embedding) == 3072:
-            print_status("Embedding generation", True, f"Dimension: {len(embedding)}")
+            print_status(True, "Embedding generation", f"Dimension: {len(embedding)}")
         elif embedding:
-            print_status("Embedding generation", False, f"Wrong dimension: {len(embedding)} (expected 3072)")
+            print_status(False, "Embedding generation", f"Wrong dimension: {len(embedding)} (expected 3072)")
             return False
         else:
-            print_status("Embedding generation", False, "No embedding returned")
+            print_status(False, "Embedding generation", "No embedding returned")
             return False
 
         return True
 
     except Exception as e:
-        print_status("Embeddings", False, str(e))
+        print_status(False, "Embeddings", str(e))
         return False
 
 
@@ -160,27 +159,27 @@ async def test_database():
         from src.storage.database import get_database_pool
 
         pool = await get_database_pool()
-        print_status("Connection pool created", True)
+        print_status(True, "Connection pool created")
 
         # Test query
         async with pool.acquire() as conn:
             result = await conn.fetchval("SELECT version()")
-            print_status("Database query", True, f"PostgreSQL {result.split()[1] if result else 'unknown'}")
+            print_status(True, "Database query", f"PostgreSQL {result.split()[1] if result else 'unknown'}")
 
             # Check pgvector extension
             ext_result = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')"
             )
             if ext_result:
-                print_status("pgvector extension", True)
+                print_status(True, "pgvector extension")
             else:
-                print_status("pgvector extension", False, "Extension not installed")
+                print_status(False, "pgvector extension", "Extension not installed")
                 return False
 
         return True
 
     except Exception as e:
-        print_status("Database", False, str(e))
+        print_status(False, "Database", str(e))
         return False
 
 
@@ -194,26 +193,26 @@ async def test_azure_search():
         settings = get_settings()
 
         if not settings.azure_ai_search_endpoint:
-            print_status("Azure AI Search", False, "Not configured (optional)")
+            print_status(False, "Azure AI Search", "Not configured (optional)")
             return True  # Optional component
 
         from src.storage.search_client import get_search_client
 
         client = await get_search_client()
-        print_status("Search client initialized", True)
+        print_status(True, "Search client initialized")
 
         # Try a simple search
         results = await client.search("test query", top=1)
-        print_status("Search query", True, f"Index accessible")
+        print_status(True, "Search query", "Index accessible")
 
         return True
 
     except Exception as e:
         error_msg = str(e)
         if "index" in error_msg.lower() and "not found" in error_msg.lower():
-            print_status("Azure AI Search", True, "Connected (index will be created on first use)")
+            print_status(True, "Azure AI Search", "Connected (index will be created on first use)")
             return True
-        print_status("Azure AI Search", False, str(e))
+        print_status(False, "Azure AI Search", str(e))
         return False
 
 
@@ -226,20 +225,20 @@ async def test_databricks():
         from src.integrations.databricks_client import get_databricks_client
 
         client = get_databricks_client()
-        print_status("Client initialized", True)
+        print_status(True, "Client initialized")
 
         # List clusters
         clusters = await client.list_clusters()
-        print_status("List clusters", True, f"Found {len(clusters)} clusters")
+        print_status(True, "List clusters", f"Found {len(clusters)} clusters")
 
         # List jobs
         jobs = await client.list_jobs(limit=5)
-        print_status("List jobs", True, f"Found {len(jobs)} jobs")
+        print_status(True, "List jobs", f"Found {len(jobs)} jobs")
 
         return True
 
     except Exception as e:
-        print_status("Databricks", False, str(e))
+        print_status(False, "Databricks", str(e))
         return False
 
 
@@ -254,14 +253,14 @@ async def test_langsmith():
         ls = get_langsmith()
 
         if not ls.enabled:
-            print_status("LangSmith", True, "Not configured (optional)")
+            print_status(True, "LangSmith", "Not configured (optional)")
             return True
 
-        print_status("LangSmith enabled", True, f"Project: {os.getenv('LANGCHAIN_PROJECT', 'default')}")
+        print_status(True, "LangSmith enabled", f"Project: {os.getenv('LANGCHAIN_PROJECT', 'default')}")
         return True
 
     except Exception as e:
-        print_status("LangSmith", False, str(e))
+        print_status(False, "LangSmith", str(e))
         return True  # Optional, don't fail
 
 
