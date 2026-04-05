@@ -1,0 +1,28 @@
+# CodeSentry Security Report
+
+**Project:** {{ result.project_path }}
+**Scanned at:** {{ result.scanned_at.strftime('%Y-%m-%d %H:%M:%S') }}
+**Duration:** {{ result.scan_duration_seconds }}s
+
+## Summary
+
+| Severity | Count |
+|----------|-------|
+{% for sev, count in result.findings_by_severity.items() %}
+| {{ sev }} | {{ count }} |
+{% endfor %}
+| **Total** | **{{ result.total_findings }}** |
+
+## Findings
+
+{% for finding in result.all_findings %}
+### {{ finding.severity }} — {{ finding.title }}
+
+- **Scanner:** {{ finding.scanner }}
+- **File:** {{ finding.file_path or 'N/A' }}{% if finding.line_start %} (line {{ finding.line_start }}){% endif %}
+- **CWE:** {{ finding.cwe.id if finding.cwe else 'N/A' }} — {{ finding.cwe.name if finding.cwe else '' }}
+- **OWASP:** {{ finding.owasp.id if finding.owasp else 'N/A' }} — {{ finding.owasp.name if finding.owasp else '' }}
+{% if finding.cve_id %}- **CVE:** {{ finding.cve_id }}{% endif %}
+{% if finding.recommendation %}- **Fix:** {{ finding.recommendation }}{% endif %}
+
+{% endfor %}
