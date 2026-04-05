@@ -43,7 +43,8 @@ def print_status(name: str, success: bool, message: str = ""):
     else:
         status = "\033[91m✗ FAIL\033[0m"
 
-    print(f"  {status} {name}")
+    sanitized_name = sanitize_message(name)
+    print(f"  {status} {sanitized_name}")
     if message:
         # Sanitize the message to avoid logging sensitive information
         sanitized = sanitize_message(message)

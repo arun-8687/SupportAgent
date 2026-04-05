@@ -163,9 +163,8 @@ class ScanOrchestrator:
                 mod = importlib.import_module(module_path)
                 cls = getattr(mod, class_name)
                 scanners.append((cls, scanner_type))
-            except (ImportError, AttributeError) as exc:
-                error_type = type(exc).__name__
-                logger.debug("Scanner %s unavailable (%s)", key, error_type)
+            except (ImportError, AttributeError):
+                logger.debug("Scanner unavailable during discovery")
 
         return scanners
 
