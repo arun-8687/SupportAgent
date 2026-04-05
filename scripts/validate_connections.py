@@ -15,14 +15,11 @@ from datetime import datetime
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def print_status(name: str, success: bool):
-    """Print status with color."""
+def status_label(success: bool) -> str:
+    """Return a colored status label."""
     if success:
-        status = "\033[92m✓ PASS\033[0m"
-    else:
-        status = "\033[91m✗ FAIL\033[0m"
-
-    print(f"  {status} {name}")
+        return "\033[92m✓ PASS\033[0m"
+    return "\033[91m✗ FAIL\033[0m"
 
 
 async def test_settings():
@@ -34,32 +31,33 @@ async def test_settings():
         from src.integrations.config import get_settings
         settings = get_settings()
 
-        print_status("Settings loaded", True)
+        print(f"  {status_label(True)} Settings loaded")
         print(f"         Environment: {settings.environment}")
 
-        # Check required settings
-        required = [
-            ("Azure OpenAI endpoint", settings.azure_openai_endpoint),
-            ("Azure OpenAI access", settings.azure_openai_api_key),
-            ("Database connection", settings.database_url),
-            ("Databricks workspace", settings.databricks_host),
-            ("Databricks access", settings.databricks_token),
-        ]
-
         all_set = True
-        for name, value in required:
-            is_set = bool(value)
-            if not is_set:
-                print_status(f"{name} not configured", False)
-                all_set = False
+        if not settings.azure_openai_endpoint:
+            print(f"  {status_label(False)} Azure OpenAI endpoint not configured")
+            all_set = False
+        if not settings.azure_openai_api_key:
+            print(f"  {status_label(False)} Azure OpenAI access not configured")
+            all_set = False
+        if not settings.database_url:
+            print(f"  {status_label(False)} Database connection not configured")
+            all_set = False
+        if not settings.databricks_host:
+            print(f"  {status_label(False)} Databricks workspace not configured")
+            all_set = False
+        if not settings.databricks_token:
+            print(f"  {status_label(False)} Databricks access not configured")
+            all_set = False
 
         if all_set:
-            print_status("All required settings", True)
+            print(f"  {status_label(True)} All required settings")
 
         return all_set
 
-    except Exception as e:
-        print_status("Settings", False)
+    except Exception:
+        print(f"  {status_label(False)} Settings")
         return False
 
 
@@ -72,7 +70,7 @@ async def test_azure_openai():
         from src.integrations.llm_client import get_llm_client
 
         client = get_llm_client()
-        print_status("Client initialized", True)
+        print(f"  {status_label(True)} Client initialized")
 
         # Test chat completion
         response = await client.chat_completion(
@@ -81,15 +79,15 @@ async def test_azure_openai():
         )
 
         if response and "Hello" in response:
-            print_status("Chat completion", True)
+            print(f"  {status_label(True)} Chat completion")
         else:
-            print_status("Chat completion", False)
+            print(f"  {status_label(False)} Chat completion")
             return False
 
         return True
 
-    except Exception as e:
-        print_status("Azure OpenAI", False)
+    except Exception:
+        print(f"  {status_label(False)} Azure OpenAI")
         return False
 
 
@@ -102,24 +100,24 @@ async def test_embeddings():
         from src.integrations.llm_client import get_embedding_client
 
         client = get_embedding_client()
-        print_status("Embedding client initialized", True)
+        print(f"  {status_label(True)} Embedding client initialized")
 
         # Test embedding
         embedding = await client.embed_text("Test incident: OutOfMemoryError in Spark job")
 
         if embedding and len(embedding) == 3072:
-            print_status("Embedding generation", True)
+            print(f"  {status_label(True)} Embedding generation")
         elif embedding:
-            print_status("Embedding generation", False)
+            print(f"  {status_label(False)} Embedding generation")
             return False
         else:
-            print_status("Embedding generation", False)
+            print(f"  {status_label(False)} Embedding generation")
             return False
 
         return True
 
-    except Exception as e:
-        print_status("Embeddings", False)
+    except Exception:
+        print(f"  {status_label(False)} Embeddings")
         return False
 
 
@@ -132,27 +130,27 @@ async def test_database():
         from src.storage.database import get_database_pool
 
         pool = await get_database_pool()
-        print_status("Connection pool created", True)
+        print(f"  {status_label(True)} Connection pool created")
 
         # Test query
         async with pool.acquire() as conn:
             result = await conn.fetchval("SELECT version()")
-            print_status("Database query", True)
+            print(f"  {status_label(True)} Database query")
 
             # Check pgvector extension
             ext_result = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')"
             )
             if ext_result:
-                print_status("pgvector extension", True)
+                print(f"  {status_label(True)} pgvector extension")
             else:
-                print_status("pgvector extension", False)
+                print(f"  {status_label(False)} pgvector extension")
                 return False
 
         return True
 
-    except Exception as e:
-        print_status("Database", False)
+    except Exception:
+        print(f"  {status_label(False)} Database")
         return False
 
 
@@ -166,26 +164,26 @@ async def test_azure_search():
         settings = get_settings()
 
         if not settings.azure_ai_search_endpoint:
-            print_status("Azure AI Search", False)
+            print(f"  {status_label(False)} Azure AI Search")
             return True  # Optional component
 
         from src.storage.search_client import get_search_client
 
         client = await get_search_client()
-        print_status("Search client initialized", True)
+        print(f"  {status_label(True)} Search client initialized")
 
         # Try a simple search
         results = await client.search("test query", top=1)
-        print_status("Search query", True)
+        print(f"  {status_label(True)} Search query")
 
         return True
 
     except Exception as e:
         error_msg = str(e)
         if "index" in error_msg.lower() and "not found" in error_msg.lower():
-            print_status("Azure AI Search", True)
+            print(f"  {status_label(True)} Azure AI Search")
             return True
-        print_status("Azure AI Search", False)
+        print(f"  {status_label(False)} Azure AI Search")
         return False
 
 
@@ -198,20 +196,20 @@ async def test_databricks():
         from src.integrations.databricks_client import get_databricks_client
 
         client = get_databricks_client()
-        print_status("Client initialized", True)
+        print(f"  {status_label(True)} Client initialized")
 
         # List clusters
         clusters = await client.list_clusters()
-        print_status("List clusters", True)
+        print(f"  {status_label(True)} List clusters")
 
         # List jobs
         jobs = await client.list_jobs(limit=5)
-        print_status("List jobs", True)
+        print(f"  {status_label(True)} List jobs")
 
         return True
 
-    except Exception as e:
-        print_status("Databricks", False)
+    except Exception:
+        print(f"  {status_label(False)} Databricks")
         return False
 
 
@@ -226,14 +224,14 @@ async def test_langsmith():
         ls = get_langsmith()
 
         if not ls.enabled:
-            print_status("LangSmith", True)
+            print(f"  {status_label(True)} LangSmith")
             return True
 
-        print_status("LangSmith enabled", True)
+        print(f"  {status_label(True)} LangSmith enabled")
         return True
 
-    except Exception as e:
-        print_status("LangSmith", False)
+    except Exception:
+        print(f"  {status_label(False)} LangSmith")
         return True  # Optional, don't fail
 
 
