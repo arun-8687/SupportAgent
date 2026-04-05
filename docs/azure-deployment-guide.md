@@ -379,7 +379,8 @@ APP_URL=$(az webapp show \
   --query defaultHostName -o tsv)
 
 # Run database migrations via psql
-PGPASSWORD="YOUR_PASSWORD" psql \
+export PGPASSWORD="<your-database-password>"
+psql \
   -h "psql-support-agent-${ENV}.postgres.database.azure.com" \
   -U supportadmin \
   -d supportagent \
@@ -674,7 +675,8 @@ az webapp deployment list-publishing-profiles \
 ### Database connection issues
 ```bash
 # Test connectivity from Cloud Shell or local
-PGPASSWORD="YOUR_PASSWORD" psql \
+export PGPASSWORD="<your-database-password>"
+psql \
   -h "psql-support-agent-${ENV}.postgres.database.azure.com" \
   -U supportadmin \
   -d supportagent \
