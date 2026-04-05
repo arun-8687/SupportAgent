@@ -28,6 +28,51 @@ echo "=== Pages to update: ==="
 echo "$PAGES"
 echo "========================"
 
+# LLM call function: tries copilot -p, then falls back to GitHub Models API
+call_llm() {
+  local prompt="$1"
+  local result=""
+
+  # Try 1: copilot -p (Copilot CLI)
+  if command -v copilot &>/dev/null; then
+    result=$(echo "$prompt" | copilot -p 2>/dev/null) && { echo "$result"; return 0; }
+    echo "WARN: copilot -p failed, trying fallback..." >&2
+  fi
+
+  # Try 2: GitHub Models REST API (uses GITHUB_TOKEN with models:read permission)
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    result=$(python3 -c "
+import json, os, urllib.request, sys
+
+prompt = sys.stdin.read()
+body = json.dumps({
+    'messages': [{'role': 'user', 'content': prompt}],
+    'model': 'gpt-4o'
+}).encode()
+
+req = urllib.request.Request(
+    'https://models.github.ai/inference/chat/completions',
+    data=body,
+    headers={
+        'Authorization': f'Bearer {os.environ[\"GITHUB_TOKEN\"]}',
+        'Content-Type': 'application/json'
+    }
+)
+
+try:
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read())
+        print(data['choices'][0]['message']['content'])
+except Exception as e:
+    print(f'ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+" <<< "$prompt" 2>/dev/null) && { echo "$result"; return 0; }
+    echo "WARN: GitHub Models API also failed" >&2
+  fi
+
+  return 1
+}
+
 # Process each affected page (except Log.md which we handle separately)
 for page in $PAGES; do
   [[ "$page" == "Log.md" ]] && continue
@@ -64,21 +109,17 @@ Instructions:
 
 Output the complete updated wiki page markdown and nothing else:"
 
-  # Use copilot CLI to generate the update
-  UPDATED=$(echo "$PROMPT" | copilot -p 2>/dev/null) || {
-    echo "WARN: copilot -p failed for $page, trying gh copilot..."
-    UPDATED=$(echo "$PROMPT" | gh copilot -p 2>/dev/null) || {
-      echo "WARN: gh copilot also failed for $page, skipping"
-      continue
-    }
+  UPDATED=$(call_llm "$PROMPT") || {
+    echo "SKIP: $page (all LLM methods failed)"
+    continue
   }
 
-  # Validate we got meaningful output (at least 100 chars and starts with #)
+  # Validate we got meaningful output (at least 100 chars and contains a heading)
   if [[ ${#UPDATED} -gt 100 ]] && [[ "$UPDATED" == *"#"* ]]; then
     echo "$UPDATED" > "$wiki_file"
     echo "OK: $page updated (${#UPDATED} chars)"
   else
-    echo "SKIP: $page (copilot output too short or invalid, ${#UPDATED} chars)"
+    echo "SKIP: $page (LLM output too short or invalid, ${#UPDATED} chars)"
   fi
 done
 
@@ -90,38 +131,40 @@ LOG_FILE="$WIKI_DIR/Log.md"
 UPDATED_LIST=""
 for page in $PAGES; do
   [[ "$page" == "Log.md" ]] && continue
-  basename="${page%.md}"
-  UPDATED_LIST="${UPDATED_LIST}\n- [[${basename}]]"
+  pagename="${page%.md}"
+  UPDATED_LIST="${UPDATED_LIST}\n- [[${pagename}]]"
 done
 
-# Generate a short summary of the diff using copilot
+# Generate a short summary of the diff using LLM
 SUMMARY_PROMPT="Summarize this code diff in one sentence (max 20 words) for a changelog entry. No markdown, no quotes, just the sentence:
 \`\`\`
 ${DIFF_CONTENT}
 \`\`\`"
 
-SUMMARY=$(echo "$SUMMARY_PROMPT" | copilot -p 2>/dev/null) || \
-SUMMARY=$(echo "$SUMMARY_PROMPT" | gh copilot -p 2>/dev/null) || \
-SUMMARY="Code changes from PR #${PR_NUMBER}"
+SUMMARY=$(call_llm "$SUMMARY_PROMPT" 2>/dev/null) || SUMMARY="Code changes from PR #${PR_NUMBER}"
 
 # Clean summary (strip quotes, newlines)
 SUMMARY=$(echo "$SUMMARY" | tr -d '\n' | sed 's/^"//;s/"$//' | head -c 120)
 
 # Prepend new log entry after the --- separator
-LOG_ENTRY="## [${TODAY}] PR #${PR_NUMBER} | ${PR_TITLE}\n\n${SUMMARY}\n\n**Pages updated:**${UPDATED_LIST}\n\n---\n"
-
-# Insert after the first --- line
-python3 -c "
-import sys
+python3 << PYEOF
 content = open('$LOG_FILE').read()
+entry = """## [${TODAY}] PR #${PR_NUMBER} | ${PR_TITLE}
+
+${SUMMARY}
+
+**Pages updated:**${UPDATED_LIST}
+
+---
+"""
 parts = content.split('---', 1)
 if len(parts) == 2:
-    new_content = parts[0] + '---\n\n' + '''${LOG_ENTRY}''' + parts[1].lstrip('\n')
+    new_content = parts[0] + '---\n\n' + entry + parts[1].lstrip('\n')
 else:
-    new_content = content + '\n\n---\n\n' + '''${LOG_ENTRY}'''
+    new_content = content + '\n\n---\n\n' + entry
 with open('$LOG_FILE', 'w') as f:
     f.write(new_content)
-"
+PYEOF
 
 echo "OK: Log.md updated with entry for PR #${PR_NUMBER}"
 echo "=== Wiki update complete ==="

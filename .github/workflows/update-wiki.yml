@@ -20,6 +20,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot-cli
+
       - name: Checkout wiki
         run: |
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
@@ -32,7 +40,6 @@ jobs:
         run: |
           PR_NUMBER=${{ github.event.pull_request.number }}
           gh pr diff "$PR_NUMBER" --repo "${{ github.repository }}" > /tmp/pr_diff.txt
-          # Get list of changed files
           gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json files --jq '.files[].path' > /tmp/changed_files.txt
           echo "## Changed files:"
           cat /tmp/changed_files.txt
@@ -49,6 +56,7 @@ jobs:
       - name: Update wiki pages with Copilot
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/update-wiki-pages.sh /tmp/pr_diff.txt /tmp/mapping.json wiki "${{ github.event.pull_request.title }}" "${{ github.event.pull_request.number }}"
 
