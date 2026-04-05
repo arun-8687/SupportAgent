@@ -200,7 +200,9 @@ az postgres flexible-server db create \
 
 ```bash
 # Connect to PostgreSQL and enable pgvector
-PGPASSWORD='<StrongPassword123!>' psql \
+# Replace <your-database-password> with your actual password before running
+export PGPASSWORD='<your-database-password>'
+psql \
   -h psql-support-agent.postgres.database.azure.com \
   -U supportadmin \
   -d supportagent \
@@ -218,7 +220,9 @@ Or via Azure Portal:
 
 ```bash
 # From project root
-PGPASSWORD='<StrongPassword123!>' psql \
+# Replace <your-database-password> with your actual password before running
+export PGPASSWORD='<your-database-password>'
+psql \
   -h psql-support-agent.postgres.database.azure.com \
   -U supportadmin \
   -d supportagent \
