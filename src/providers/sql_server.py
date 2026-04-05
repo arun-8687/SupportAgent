@@ -8,6 +8,7 @@ Provides SQL Server-specific functionality for:
 - Verifying fixes
 """
 import asyncio
+import re
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -473,9 +474,12 @@ class SQLServerProvider(BaseProvider):
 
         try:
             if procedure_name:
+                # Validate procedure_name to prevent SQL injection (only allow safe identifier chars)
+                if not re.match(r'^[A-Za-z0-9_.]+$', procedure_name):
+                    raise ValueError(f"Invalid procedure_name: {procedure_name!r}")
                 # Clear plan for specific procedure
                 await self._execute_query(
-                    f"DBCC FREEPROCCACHE (SELECT plan_handle FROM sys.dm_exec_procedure_stats "
+                    "DBCC FREEPROCCACHE (SELECT plan_handle FROM sys.dm_exec_procedure_stats "
                     f"WHERE object_name(object_id) = '{procedure_name}')"
                 )
             else:

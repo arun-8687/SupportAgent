@@ -407,7 +407,9 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """Get recent incidents for deduplication."""
         async with self.pool.acquire() as conn:
-            query = """
+            time_window_minutes = int(time_window_minutes)
+            limit = int(limit)
+            query = f"""
                 SELECT
                     incident_id,
                     job_name,
@@ -416,8 +418,8 @@ class VectorStore:
                     error_code,
                     created_at
                 FROM incidents
-                WHERE created_at > NOW() - INTERVAL '%s minutes'
-            """ % time_window_minutes
+                WHERE created_at > NOW() - INTERVAL '{time_window_minutes} minutes'
+            """
 
             params = []
 
@@ -425,7 +427,7 @@ class VectorStore:
                 query += " AND job_name = $1"
                 params.append(job_name)
 
-            query += " ORDER BY created_at DESC LIMIT %s" % limit
+            query += f" ORDER BY created_at DESC LIMIT {limit}"
 
             rows = await conn.fetch(query, *params)
             return [dict(row) for row in rows]
@@ -606,18 +608,19 @@ class PersistentCircuitBreaker:
 
         async with self.pool.acquire() as conn:
             # Upsert failure count
-            await conn.execute("""
+            window_minutes = int(self.window.total_seconds() // 60)
+            await conn.execute(f"""
                 INSERT INTO circuit_breaker_state (key, failure_count, last_failure_at, updated_at)
                 VALUES ($1, 1, $2, $2)
                 ON CONFLICT (key) DO UPDATE SET
                     failure_count = CASE
-                        WHEN circuit_breaker_state.last_failure_at < NOW() - INTERVAL '%s minutes'
+                        WHEN circuit_breaker_state.last_failure_at < NOW() - INTERVAL '{window_minutes} minutes'
                         THEN 1
                         ELSE circuit_breaker_state.failure_count + 1
                     END,
                     last_failure_at = $2,
                     updated_at = $2
-            """ % self.window.total_seconds() // 60, key, now)
+            """, key, now)
 
             # Check if we should open the circuit
             row = await conn.fetchrow("""

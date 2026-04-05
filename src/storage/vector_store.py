@@ -613,8 +613,17 @@ class VectorStore:
         params = [embedding, top_k]
         param_idx = 3
 
+        _allowed_filter_columns: Dict[str, set] = {
+            "incident_embeddings": {"incident_id", "job_name", "job_type", "status", "error_code"},
+            "known_error_embeddings": {"kedb_id", "active"},
+            "runbook_embeddings": {"runbook_id", "issue_type", "active"},
+            "knowledge_embeddings": {"doc_id", "doc_type", "source"},
+        }
+        allowed_cols = _allowed_filter_columns.get(table, set())
         if filter:
             for key, value in filter.items():
+                if key not in allowed_cols:
+                    raise ValueError(f"Filter key {key!r} is not allowed for table {table!r}")
                 conditions.append(f"{key} = ${param_idx}")
                 params.append(value)
                 param_idx += 1
