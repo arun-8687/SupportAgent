@@ -164,8 +164,8 @@ class ScanOrchestrator:
                 cls = getattr(mod, class_name)
                 scanners.append((cls, scanner_type))
             except (ImportError, AttributeError) as exc:
-                sanitized_error = sanitize_error_message(str(exc))
-                logger.debug("Scanner %s unavailable: %s", key, sanitized_error)
+                error_type = type(exc).__name__
+                logger.debug("Scanner %s unavailable (%s)", key, error_type)
 
         return scanners
 
