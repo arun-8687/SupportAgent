@@ -30,6 +30,7 @@ class IaCScanner(BaseScanner):
     async def scan(self, path: str, **kwargs) -> ScanResult:
         result = self._create_result()
         start = time.time()
+        self._get_file_filter(Path(path))
 
         try:
             if self._check_tool_available("checkov"):
@@ -111,11 +112,8 @@ class IaCScanner(BaseScanner):
     # -- Built-in Dockerfile scanner ---------------------------------------
 
     def _scan_dockerfiles(self, root: Path, result: ScanResult) -> None:
-        dockerfiles = list(root.rglob("Dockerfile*"))
+        dockerfiles = list(self._iter_files(root, "Dockerfile*"))
         for df in dockerfiles:
-            if self._is_excluded(str(df)):
-                result.skipped_files += 1
-                continue
             try:
                 content = df.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -283,9 +281,7 @@ class IaCScanner(BaseScanner):
                 self._check_compose(content, str(cf), result)
 
         # Also scan nested compose files
-        for cf in root.rglob("docker-compose*.y*ml"):
-            if self._is_excluded(str(cf)):
-                continue
+        for cf in self._iter_files(root, "docker-compose*.y*ml"):
             try:
                 content = cf.read_text(encoding="utf-8", errors="replace")
             except OSError:

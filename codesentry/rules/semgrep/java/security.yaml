@@ -1,0 +1,55 @@
+rules:
+  - id: java-sql-injection
+    patterns:
+      - pattern: |
+          $STMT.executeQuery($QUERY + $VAR)
+      - pattern: |
+          $STMT.execute($QUERY + $VAR)
+    message: "SQL injection via string concatenation. Use PreparedStatement."
+    languages: [java]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-89"]
+
+  - id: java-command-injection
+    patterns:
+      - pattern: Runtime.getRuntime().exec($CMD)
+      - pattern: new ProcessBuilder($CMD).start()
+    message: "Potential command injection."
+    languages: [java]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-78"]
+
+  - id: java-xxe
+    patterns:
+      - pattern: |
+          $FACTORY = DocumentBuilderFactory.newInstance()
+    message: "XML parser may be vulnerable to XXE. Disable external entities."
+    languages: [java]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-611"]
+
+  - id: java-deserialization
+    patterns:
+      - pattern: |
+          $OIS.readObject()
+      - pattern: |
+          new ObjectInputStream(...)
+    message: "Unsafe deserialization. Validate input before deserializing."
+    languages: [java]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-502"]
+
+  - id: java-weak-crypto
+    patterns:
+      - pattern: MessageDigest.getInstance("MD5")
+      - pattern: MessageDigest.getInstance("SHA1")
+      - pattern: Cipher.getInstance("DES")
+    message: "Weak cryptographic algorithm."
+    languages: [java]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-327"]

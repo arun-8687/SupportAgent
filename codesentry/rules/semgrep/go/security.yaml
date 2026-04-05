@@ -1,0 +1,52 @@
+rules:
+  - id: go-sql-injection
+    patterns:
+      - pattern: |
+          $DB.Query(fmt.Sprintf($FMT, ...))
+      - pattern: |
+          $DB.Exec($Q + $VAR)
+    message: "SQL injection. Use parameterized queries with $1, $2 placeholders."
+    languages: [go]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-89"]
+
+  - id: go-command-injection
+    patterns:
+      - pattern: exec.Command($CMD, ...)
+    message: "Potential command injection. Validate command arguments."
+    languages: [go]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-78"]
+
+  - id: go-ssrf
+    patterns:
+      - pattern: http.Get($URL)
+      - pattern: http.Post($URL, ...)
+    message: "Potential SSRF if URL is user-controlled."
+    languages: [go]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-918"]
+
+  - id: go-insecure-tls
+    patterns:
+      - pattern: |
+          &tls.Config{..., InsecureSkipVerify: true, ...}
+    message: "TLS certificate verification disabled."
+    languages: [go]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-295"]
+
+  - id: go-weak-crypto
+    patterns:
+      - pattern: md5.New()
+      - pattern: sha1.New()
+      - pattern: des.NewCipher(...)
+    message: "Weak cryptographic algorithm."
+    languages: [go]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-327"]

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import abc
 import shutil
-import time
-from typing import Optional
+from pathlib import Path
+from typing import Iterable, Optional
 
 from codesentry.config import ScanConfig
+from codesentry.file_filter import FileFilter
 from codesentry.models import ScanResult, ScannerType
 
 
@@ -22,6 +23,7 @@ class BaseScanner(abc.ABC):
 
     def __init__(self, config: Optional[ScanConfig] = None):
         self.config = config or ScanConfig()
+        self._file_filter: Optional[FileFilter] = None
 
     # -- helpers available to all scanners --------------------------------
 
@@ -39,9 +41,27 @@ class BaseScanner(abc.ABC):
         """Return *True* if *tool_name* is found on ``PATH``."""
         return shutil.which(tool_name) is not None
 
+    def _get_file_filter(self, root: Path) -> FileFilter:
+        """Return a FileFilter that respects .gitignore and exclude_paths."""
+        if self._file_filter is None:
+            self._file_filter = FileFilter(
+                root=root,
+                exclude_paths=self.config.exclude_paths,
+                respect_gitignore=True,
+            )
+        return self._file_filter
+
     def _is_excluded(self, file_path: str) -> bool:
-        """Return *True* if *file_path* matches any exclude pattern."""
+        """Return *True* if *file_path* should be skipped."""
+        if self._file_filter is not None:
+            return self._file_filter.is_excluded(Path(file_path))
+        # Fallback to simple pattern matching
         for pattern in self.config.exclude_paths:
             if pattern in file_path:
                 return True
         return False
+
+    def _iter_files(self, root: Path, pattern: str = "*") -> Iterable[Path]:
+        """Yield files matching *pattern* under *root*, respecting .gitignore."""
+        ff = self._get_file_filter(root)
+        return ff.iter_files(pattern=pattern)

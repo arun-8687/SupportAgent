@@ -1,0 +1,38 @@
+name: "Copilot Setup Steps"
+
+on:
+    workflow_dispatch:
+    push:
+        paths:
+            - .github/workflows/copilot-setup-steps.yml
+    pull_request:
+        paths:
+            - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+    copilot-setup-steps:
+        runs-on: ubuntu-latest
+
+        permissions:
+            contents: read
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+                  cache: "pip"
+
+            - name: Install codesentry and security-fixer
+              run: pip install -e .
+
+            - name: Install GitHub CLI (already on ubuntu-latest)
+              run: gh --version
+
+            - name: Verify tools are available
+              run: |
+                  python -m codesentry scan --help
+                  python -m security_fixer fix --help

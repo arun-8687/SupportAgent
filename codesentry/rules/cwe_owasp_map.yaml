@@ -1,0 +1,206 @@
+# CWE to OWASP Top 10 (2025) mapping
+mappings:
+  CWE-79:
+    name: "Cross-site Scripting (XSS)"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-89:
+    name: "SQL Injection"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-78:
+    name: "OS Command Injection"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-94:
+    name: "Code Injection"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-77:
+    name: "Command Injection"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-20:
+    name: "Improper Input Validation"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-787:
+    name: "Out-of-bounds Write"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-352:
+    name: "Cross-Site Request Forgery (CSRF)"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-862:
+    name: "Missing Authorization"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-863:
+    name: "Incorrect Authorization"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-639:
+    name: "Authorization Bypass Through User-Controlled Key"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-918:
+    name: "Server-Side Request Forgery (SSRF)"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-22:
+    name: "Path Traversal"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-284:
+    name: "Improper Access Control"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-732:
+    name: "Incorrect Permission Assignment"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-200:
+    name: "Exposure of Sensitive Information"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-502:
+    name: "Deserialization of Untrusted Data"
+    owasp: "A08"
+    owasp_name: "Software and Data Integrity Failures"
+  CWE-829:
+    name: "Inclusion of Functionality from Untrusted Control Sphere"
+    owasp: "A08"
+    owasp_name: "Software and Data Integrity Failures"
+  CWE-506:
+    name: "Embedded Malicious Code"
+    owasp: "A08"
+    owasp_name: "Software and Data Integrity Failures"
+  CWE-798:
+    name: "Use of Hard-coded Credentials"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-287:
+    name: "Improper Authentication"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-306:
+    name: "Missing Authentication for Critical Function"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-259:
+    name: "Use of Hard-coded Password"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-327:
+    name: "Use of a Broken or Risky Cryptographic Algorithm"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-328:
+    name: "Use of Weak Hash"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-330:
+    name: "Use of Insufficiently Random Values"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-311:
+    name: "Missing Encryption of Sensitive Data"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-321:
+    name: "Use of Hard-coded Cryptographic Key"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-295:
+    name: "Improper Certificate Validation"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-16:
+    name: "Configuration"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-250:
+    name: "Execution with Unnecessary Privileges"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-770:
+    name: "Allocation of Resources Without Limits"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-489:
+    name: "Active Debug Code"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-693:
+    name: "Protection Mechanism Failure"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-1021:
+    name: "Improper Restriction of Rendered UI Layers"
+    owasp: "A02"
+    owasp_name: "Security Misconfiguration"
+  CWE-778:
+    name: "Insufficient Logging"
+    owasp: "A09"
+    owasp_name: "Security Logging and Alerting Failures"
+  CWE-532:
+    name: "Insertion of Sensitive Information into Log File"
+    owasp: "A09"
+    owasp_name: "Security Logging and Alerting Failures"
+  CWE-755:
+    name: "Improper Handling of Exceptional Conditions"
+    owasp: "A10"
+    owasp_name: "Mishandling of Exceptional Conditions"
+  CWE-754:
+    name: "Improper Check for Unusual Conditions"
+    owasp: "A10"
+    owasp_name: "Mishandling of Exceptional Conditions"
+  CWE-319:
+    name: "Cleartext Transmission of Sensitive Information"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-312:
+    name: "Cleartext Storage of Sensitive Information"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-384:
+    name: "Session Fixation"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-613:
+    name: "Insufficient Session Expiration"
+    owasp: "A07"
+    owasp_name: "Authentication Failures"
+  CWE-614:
+    name: "Sensitive Cookie in HTTPS Session Without Secure Attribute"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-346:
+    name: "Origin Validation Error"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-477:
+    name: "Use of Obsolete Function"
+    owasp: "A06"
+    owasp_name: "Insecure Design"
+  CWE-598:
+    name: "Use of GET Request Method With Sensitive Query Strings"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-209:
+    name: "Generation of Error Message Containing Sensitive Information"
+    owasp: "A01"
+    owasp_name: "Broken Access Control"
+  CWE-611:
+    name: "Improper Restriction of XML External Entity Reference"
+    owasp: "A05"
+    owasp_name: "Injection"
+  CWE-916:
+    name: "Use of Password Hash With Insufficient Computational Effort"
+    owasp: "A04"
+    owasp_name: "Cryptographic Failures"
+  CWE-1035:
+    name: "Using Components with Known Vulnerabilities"
+    owasp: "A03"
+    owasp_name: "Software Supply Chain Failures"

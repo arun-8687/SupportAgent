@@ -179,15 +179,13 @@ class SecretScanner(BaseScanner):
 
     def _run_builtin(self, path: str, result: ScanResult) -> None:
         root = Path(path)
-        files = root.rglob("*") if root.is_dir() else [root]
+        self._get_file_filter(root)
+        files = self._iter_files(root, "*") if root.is_dir() else [root]
 
         for file_path in files:
             if not file_path.is_file():
                 continue
             rel = str(file_path)
-            if self._is_excluded(rel):
-                result.skipped_files += 1
-                continue
             if file_path.suffix.lower() in _BINARY_EXTENSIONS:
                 result.skipped_files += 1
                 continue

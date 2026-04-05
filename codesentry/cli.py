@@ -148,3 +148,4 @@ async def _run_scan(
     )
     if above_threshold > 0:
         sys.exit(1)
+

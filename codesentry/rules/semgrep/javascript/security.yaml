@@ -1,0 +1,84 @@
+rules:
+  - id: js-sql-injection
+    patterns:
+      - pattern: $DB.query(`...${$VAR}...`)
+      - pattern: $DB.query($QUERY + $VAR)
+    message: "Potential SQL injection. Use parameterized queries."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-89"]
+
+  - id: js-xss-innerhtml
+    patterns:
+      - pattern: $EL.innerHTML = $VAR
+      - pattern: document.write($VAR)
+    message: "Potential XSS via innerHTML or document.write. Use textContent or DOMPurify."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-79"]
+
+  - id: js-eval-injection
+    patterns:
+      - pattern: eval(...)
+      - pattern: Function(...)($ARGS)
+      - pattern: setTimeout($STR, ...)
+    message: "Use of eval/Function can lead to code injection."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-94"]
+
+  - id: js-command-injection
+    patterns:
+      - pattern: child_process.exec($CMD)
+      - pattern: child_process.execSync($CMD)
+    message: "Potential command injection. Use execFile with argument array."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-78"]
+
+  - id: js-path-traversal
+    patterns:
+      - pattern: path.join(..., $USER_INPUT, ...)
+      - pattern: fs.readFile($PATH, ...)
+    message: "Potential path traversal. Validate paths against base directory."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-22"]
+
+  - id: js-hardcoded-secret
+    pattern: |
+      const $VAR = "..."
+    metavariable-regex:
+      metavariable: $VAR
+      regex: (?i)(password|secret|token|api_key|apikey)
+    message: "Potential hardcoded credential."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-798"]
+
+  - id: js-insecure-cookie
+    pattern: |
+      $RES.cookie(..., {..., secure: false, ...})
+    message: "Cookie without Secure flag."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-614"]
+
+  - id: js-no-csrf
+    pattern: |
+      app.$METHOD($PATH, $HANDLER)
+    metavariable-regex:
+      metavariable: $METHOD
+      regex: (post|put|delete|patch)
+    message: "Route handler may lack CSRF protection."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-352"]

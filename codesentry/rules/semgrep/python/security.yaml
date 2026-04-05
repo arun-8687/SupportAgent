@@ -1,0 +1,115 @@
+rules:
+  - id: python-sql-injection
+    patterns:
+      - pattern: |
+          $CURSOR.execute($QUERY % ...)
+      - pattern: |
+          $CURSOR.execute($QUERY.format(...))
+      - pattern: |
+          $CURSOR.execute(f"...{$VAR}...")
+    message: "Potential SQL injection via string formatting. Use parameterized queries."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-89"]
+      owasp: ["A05:2025"]
+      category: security
+
+  - id: python-command-injection
+    patterns:
+      - pattern: os.system(...)
+      - pattern: subprocess.call(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: subprocess.run(..., shell=True, ...)
+    message: "Potential OS command injection. Avoid shell=True and os.system()."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-78"]
+      owasp: ["A05:2025"]
+
+  - id: python-eval-injection
+    patterns:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    message: "Use of eval/exec can lead to code injection."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-94"]
+
+  - id: python-unsafe-deserialization
+    patterns:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: yaml.load(...)
+      - pattern: marshal.loads(...)
+    message: "Unsafe deserialization. Use yaml.safe_load() and avoid pickle with untrusted data."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-502"]
+
+  - id: python-weak-crypto
+    patterns:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+      - pattern: DES.new(...)
+    message: "Weak cryptographic algorithm. Use SHA-256+ or AES."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-327"]
+
+  - id: python-hardcoded-password
+    pattern: |
+      $VAR = "..."
+    metavariable-regex:
+      metavariable: $VAR
+      regex: (?i)(password|passwd|pwd|secret|token|api_key)
+    message: "Potential hardcoded credential."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-798"]
+
+  - id: python-path-traversal
+    patterns:
+      - pattern: open(os.path.join($BASE, $USER_INPUT), ...)
+      - pattern: |
+          open($PATH, ...)
+    message: "Potential path traversal. Validate and sanitize file paths."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-22"]
+
+  - id: python-ssrf
+    patterns:
+      - pattern: requests.get($URL, ...)
+      - pattern: urllib.request.urlopen($URL)
+    message: "Potential SSRF if URL is user-controlled. Validate against allowlist."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-918"]
+
+  - id: python-debug-enabled
+    patterns:
+      - pattern: app.run(..., debug=True, ...)
+      - pattern: DEBUG = True
+    message: "Debug mode enabled. Disable in production."
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-489"]
+
+  - id: python-no-verify-ssl
+    patterns:
+      - pattern: requests.get(..., verify=False, ...)
+      - pattern: requests.post(..., verify=False, ...)
+    message: "SSL verification disabled. This allows MITM attacks."
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-295"]

@@ -380,7 +380,8 @@ class CodeScanner(BaseScanner):
 
     async def _run_builtin(self, path: str, result: ScanResult) -> None:
         root = Path(path)
-        py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+        self._get_file_filter(root)
+        py_files = list(self._iter_files(root, "*.py")) if root.is_dir() else [root]
 
         for py_file in py_files:
             rel = str(py_file)

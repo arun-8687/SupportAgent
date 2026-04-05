@@ -1,0 +1,132 @@
+standard: "OWASP ASVS"
+version: "5.0"
+categories:
+  V2:
+    name: "Authentication"
+    controls:
+      - id: "V2.1.1"
+        title: "No hardcoded credentials"
+        description: "Verify that no hardcoded passwords, API keys, or tokens exist in source code"
+        cwe_mappings: ["CWE-798", "CWE-259"]
+        level: 1
+        automated: true
+      - id: "V2.1.2"
+        title: "Strong password hashing"
+        description: "Verify that passwords are stored using approved one-way functions (bcrypt, scrypt, Argon2)"
+        cwe_mappings: ["CWE-916", "CWE-327"]
+        level: 1
+        automated: true
+      - id: "V2.2.1"
+        title: "No default credentials"
+        description: "Verify that default passwords are not present"
+        cwe_mappings: ["CWE-798"]
+        level: 1
+        automated: true
+
+  V4:
+    name: "Access Control"
+    controls:
+      - id: "V4.1.1"
+        title: "Authorization checks present"
+        description: "Verify that all access control decisions are enforced server-side"
+        cwe_mappings: ["CWE-862", "CWE-863"]
+        level: 1
+        automated: true
+      - id: "V4.1.2"
+        title: "No IDOR vulnerabilities"
+        description: "Verify that direct object references are protected"
+        cwe_mappings: ["CWE-639"]
+        level: 2
+        automated: false
+
+  V5:
+    name: "Validation and Encoding"
+    controls:
+      - id: "V5.1.1"
+        title: "Input validation"
+        description: "Verify that all input is validated for type, length, range"
+        cwe_mappings: ["CWE-20"]
+        level: 1
+        automated: true
+      - id: "V5.2.1"
+        title: "XSS prevention"
+        description: "Verify output encoding prevents XSS"
+        cwe_mappings: ["CWE-79"]
+        level: 1
+        automated: true
+      - id: "V5.3.1"
+        title: "SQL injection prevention"
+        description: "Verify parameterized queries prevent SQL injection"
+        cwe_mappings: ["CWE-89"]
+        level: 1
+        automated: true
+      - id: "V5.3.2"
+        title: "OS command injection prevention"
+        description: "Verify OS commands use safe APIs"
+        cwe_mappings: ["CWE-78"]
+        level: 1
+        automated: true
+
+  V6:
+    name: "Cryptography"
+    controls:
+      - id: "V6.1.1"
+        title: "Strong algorithms only"
+        description: "Verify that only approved cryptographic algorithms are used"
+        cwe_mappings: ["CWE-327", "CWE-328"]
+        level: 1
+        automated: true
+      - id: "V6.2.1"
+        title: "No hardcoded keys"
+        description: "Verify that cryptographic keys are not hardcoded"
+        cwe_mappings: ["CWE-321"]
+        level: 1
+        automated: true
+
+  V8:
+    name: "Data Protection"
+    controls:
+      - id: "V8.1.1"
+        title: "No sensitive data exposure"
+        description: "Verify that sensitive data is not logged or exposed in errors"
+        cwe_mappings: ["CWE-200", "CWE-532"]
+        level: 1
+        automated: true
+      - id: "V8.2.1"
+        title: "Encrypted data at rest"
+        description: "Verify sensitive data is encrypted at rest"
+        cwe_mappings: ["CWE-311", "CWE-312"]
+        level: 2
+        automated: true
+
+  V9:
+    name: "Communication Security"
+    controls:
+      - id: "V9.1.1"
+        title: "TLS for all connections"
+        description: "Verify that TLS is used for all connections"
+        cwe_mappings: ["CWE-319"]
+        level: 1
+        automated: true
+      - id: "V9.1.2"
+        title: "Certificate validation"
+        description: "Verify that certificate validation is not disabled"
+        cwe_mappings: ["CWE-295"]
+        level: 1
+        automated: true
+
+  V14:
+    name: "Configuration"
+    controls:
+      - id: "V14.1.1"
+        title: "Debug mode disabled"
+        description: "Verify that debug mode is disabled in production"
+        cwe_mappings: ["CWE-489"]
+        level: 1
+        automated: true
+      - id: "V14.2.1"
+        title: "Security headers present"
+        description: "Verify HTTP security headers are set"
+        cwe_mappings: ["CWE-693", "CWE-1021"]
+        level: 1
+        automated: true
