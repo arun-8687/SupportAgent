@@ -164,7 +164,7 @@ class ScanOrchestrator:
                 cls = getattr(mod, class_name)
                 scanners.append((cls, scanner_type))
             except (ImportError, AttributeError):
-                logger.debug("Scanner unavailable during discovery")
+                logger.debug("Scanner unavailable during discovery: %s", scanner_type.value)
 
         return scanners
 

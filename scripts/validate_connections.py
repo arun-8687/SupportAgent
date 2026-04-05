@@ -65,11 +65,11 @@ async def test_settings():
 
         # Check required settings
         required = [
-            ("AZURE_OPENAI_ENDPOINT", settings.azure_openai_endpoint),
-            ("AZURE_OPENAI_API_KEY", settings.azure_openai_api_key),
-            ("DATABASE_URL", settings.database_url),
-            ("DATABRICKS_HOST", settings.databricks_host),
-            ("DATABRICKS_TOKEN", settings.databricks_token),
+            ("Azure OpenAI endpoint", settings.azure_openai_endpoint),
+            ("Azure OpenAI access", settings.azure_openai_api_key),
+            ("Database connection", settings.database_url),
+            ("Databricks workspace", settings.databricks_host),
+            ("Databricks access", settings.databricks_token),
         ]
 
         all_set = True
