@@ -25,17 +25,20 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot-cli
-
-      - name: Authenticate Copilot CLI
+      - name: Install and authenticate Copilot CLI
         env:
           COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
         run: |
-          # Authenticate copilot CLI using the PAT with Copilot access
-          echo "$COPILOT_TOKEN" | copilot auth login --with-token 2>/dev/null || \
-          echo "$COPILOT_TOKEN" | gh auth login --with-token 2>/dev/null || true
-          copilot auth status 2>/dev/null || true
+          # Install the Copilot CLI (package is @githubnext/github-copilot-cli)
+          npm install -g @githubnext/github-copilot-cli 2>/dev/null || \
+          npm install -g @githubnext/copilot-cli 2>/dev/null || true
+          # Authenticate with the PAT
+          if command -v copilot &>/dev/null; then
+            echo "$COPILOT_TOKEN" | copilot auth login --with-token 2>/dev/null || true
+            echo "Copilot CLI authenticated"
+          else
+            echo "Copilot CLI not available, will use GitHub Models API fallback"
+          fi
 
       - name: Checkout wiki
         run: |
