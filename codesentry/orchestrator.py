@@ -104,9 +104,10 @@ class ScanOrchestrator:
                 result.findings = [enrich_finding(f) for f in result.findings]
                 scan_results.append(result)
             elif isinstance(result, Exception):
-                logger.warning("Scanner failed: %s", sanitize_error_message(str(result)))
+                sanitized_error = sanitize_error_message(str(result))
+                logger.warning("Scanner failed: %s", sanitized_error)
                 scan_results.append(
-                    ScanResult(scanner=ScannerType.CODE, errors=[sanitize_error_message(str(result))])
+                    ScanResult(scanner=ScannerType.CODE, errors=[sanitized_error])
                 )
 
         # Compliance scanner runs last — it needs the combined findings.
@@ -124,11 +125,12 @@ class ScanOrchestrator:
                 ]
                 scan_results.append(comp_result)
             except Exception as exc:
-                logger.warning("Compliance scanner failed: %s", sanitize_error_message(str(exc)))
+                sanitized_error = sanitize_error_message(str(exc))
+                logger.warning("Compliance scanner failed: %s", sanitized_error)
                 scan_results.append(
                     ScanResult(
                         scanner=ScannerType.COMPLIANCE,
-                        errors=[sanitize_error_message(str(exc))],
+                        errors=[sanitized_error],
                     )
                 )
 
@@ -162,7 +164,8 @@ class ScanOrchestrator:
                 cls = getattr(mod, class_name)
                 scanners.append((cls, scanner_type))
             except (ImportError, AttributeError) as exc:
-                logger.debug("Scanner %s unavailable: %s", key, sanitize_error_message(str(exc)))
+                sanitized_error = sanitize_error_message(str(exc))
+                logger.debug("Scanner %s unavailable: %s", key, sanitized_error)
 
         return scanners
 
@@ -191,4 +194,5 @@ class ScanOrchestrator:
             scanner = cls({})
             return await scanner.scan(path, exclude_paths=cfg.exclude_paths)
         except Exception as exc:
-            return ScanResult(scanner=scanner_type, errors=[sanitize_error_message(str(exc))])
+            sanitized_error = sanitize_error_message(str(exc))
+            return ScanResult(scanner=scanner_type, errors=[sanitized_error])
