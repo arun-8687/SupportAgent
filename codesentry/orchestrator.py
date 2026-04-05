@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import re
 import time
 from typing import List, Optional, Tuple, Type
 
@@ -14,6 +15,25 @@ from codesentry.models import FullScanResult, ScanResult, ScannerType, Finding
 from codesentry.project_detector import ProjectInfo, detect_project
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_error_message(error_msg: str) -> str:
+    """Sanitize potentially sensitive information from error messages."""
+    # Redact common patterns for API keys, tokens, passwords, connection strings
+    patterns = [
+        (r'(api[_-]?key[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(token[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(password[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(secret[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(postgresql://[^:]+:)([^@]+)(@)', r'\1***REDACTED***\3'),
+        (r'(AccountKey=)([^;]+)', r'\1***REDACTED***'),
+    ]
+
+    sanitized = error_msg
+    for pattern, replacement in patterns:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+
+    return sanitized
 
 # Maps lowercase scanner keys to (module_path, class_name, ScannerType).
 # Compliance is intentionally excluded — it runs after all others.
@@ -84,9 +104,9 @@ class ScanOrchestrator:
                 result.findings = [enrich_finding(f) for f in result.findings]
                 scan_results.append(result)
             elif isinstance(result, Exception):
-                logger.warning("Scanner failed: %s", result)
+                logger.warning("Scanner failed: %s", sanitize_error_message(str(result)))
                 scan_results.append(
-                    ScanResult(scanner=ScannerType.CODE, errors=[str(result)])
+                    ScanResult(scanner=ScannerType.CODE, errors=[sanitize_error_message(str(result))])
                 )
 
         # Compliance scanner runs last — it needs the combined findings.
@@ -104,11 +124,11 @@ class ScanOrchestrator:
                 ]
                 scan_results.append(comp_result)
             except Exception as exc:
-                logger.warning("Compliance scanner failed: %s", exc)
+                logger.warning("Compliance scanner failed: %s", sanitize_error_message(str(exc)))
                 scan_results.append(
                     ScanResult(
                         scanner=ScannerType.COMPLIANCE,
-                        errors=[str(exc)],
+                        errors=[sanitize_error_message(str(exc))],
                     )
                 )
 
@@ -142,7 +162,7 @@ class ScanOrchestrator:
                 cls = getattr(mod, class_name)
                 scanners.append((cls, scanner_type))
             except (ImportError, AttributeError) as exc:
-                logger.debug("Scanner %s unavailable: %s", key, exc)
+                logger.debug("Scanner %s unavailable: %s", key, sanitize_error_message(str(exc)))
 
         return scanners
 
@@ -171,4 +191,4 @@ class ScanOrchestrator:
             scanner = cls({})
             return await scanner.scan(path, exclude_paths=cfg.exclude_paths)
         except Exception as exc:
-            return ScanResult(scanner=scanner_type, errors=[str(exc)])
+            return ScanResult(scanner=scanner_type, errors=[sanitize_error_message(str(exc))])

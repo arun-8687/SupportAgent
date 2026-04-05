@@ -9,11 +9,31 @@ Usage:
 """
 import asyncio
 import os
+import re
 import sys
 from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def sanitize_message(message: str) -> str:
+    """Sanitize potentially sensitive information from messages."""
+    # Redact common patterns for API keys, tokens, passwords, connection strings
+    patterns = [
+        (r'(api[_-]?key[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(token[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(password[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(secret[\'"]?\s*[:=]\s*[\'"]?)([^\'")\s]+)', r'\1***REDACTED***'),
+        (r'(postgresql://[^:]+:)([^@]+)(@)', r'\1***REDACTED***\3'),
+        (r'(AccountKey=)([^;]+)', r'\1***REDACTED***'),
+    ]
+
+    sanitized = message
+    for pattern, replacement in patterns:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+
+    return sanitized
 
 
 def print_status(name: str, success: bool, message: str = ""):
@@ -25,7 +45,9 @@ def print_status(name: str, success: bool, message: str = ""):
 
     print(f"  {status} {name}")
     if message:
-        print(f"         {message}")
+        # Sanitize the message to avoid logging sensitive information
+        sanitized = sanitize_message(message)
+        print(f"         {sanitized}")
 
 
 async def test_settings():
