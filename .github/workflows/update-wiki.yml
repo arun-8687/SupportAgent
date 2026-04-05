@@ -28,6 +28,15 @@ jobs:
       - name: Install Copilot CLI
         run: npm install -g @github/copilot-cli
 
+      - name: Authenticate Copilot CLI
+        env:
+          COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+        run: |
+          # Authenticate copilot CLI using the PAT with Copilot access
+          echo "$COPILOT_TOKEN" | copilot auth login --with-token 2>/dev/null || \
+          echo "$COPILOT_TOKEN" | gh auth login --with-token 2>/dev/null || true
+          copilot auth status 2>/dev/null || true
+
       - name: Checkout wiki
         run: |
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
@@ -56,7 +65,7 @@ jobs:
       - name: Update wiki pages with Copilot
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
         run: |
           bash scripts/update-wiki-pages.sh /tmp/pr_diff.txt /tmp/mapping.json wiki "${{ github.event.pull_request.title }}" "${{ github.event.pull_request.number }}"
 
