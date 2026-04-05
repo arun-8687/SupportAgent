@@ -30,7 +30,7 @@ async def test_langsmith():
     project = os.getenv("LANGCHAIN_PROJECT", "support-agent-test")
 
     print(f"\nConfiguration:")
-    print(f"  LANGCHAIN_API_KEY: {'***' + api_key[-8:] if len(api_key) > 8 else 'NOT SET'}")
+    print(f"  LANGCHAIN_API_KEY: {'***REDACTED***' if api_key else 'NOT SET'}")
     print(f"  LANGCHAIN_PROJECT: {project}")
     print(f"  LANGCHAIN_ENDPOINT: {os.getenv('LANGCHAIN_ENDPOINT', 'https://api.smith.langchain.com')}")
 
