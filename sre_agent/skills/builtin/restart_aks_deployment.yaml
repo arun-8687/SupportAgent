@@ -1,0 +1,17 @@
+name: restart_aks_deployment
+description: Rolling restart of an AKS deployment (kubectl rollout restart) to recycle unhealthy pods.
+category: compute
+risk: medium
+parameters:
+  - namespace
+  - deployment
+executor: shell
+command: "kubectl rollout restart deployment/{deployment} -n {namespace}"
+verification_command: "kubectl rollout status deployment/{deployment} -n {namespace} --timeout=180s"
+supports_rollback: false
+applies_to:
+  - memory
+  - oomkilled
+  - crashloop
+  - aks
+  - kubernetes

@@ -1,0 +1,30 @@
+# MCP server connections.
+#
+# Each entry becomes a set of extra tools available to subagents via the
+# Model Context Protocol (loaded with langchain-mcp-adapters when the
+# optional dependency is installed). Disabled by default — enable per
+# environment and provide credentials via env vars, never inline.
+
+servers:
+  - name: grafana
+    enabled: false
+    transport: streamable_http
+    url: https://grafana.example.com/api/mcp
+    headers:
+      Authorization: "Bearer ${GRAFANA_MCP_TOKEN}"
+
+  - name: prometheus
+    enabled: false
+    transport: stdio
+    command: uvx
+    args: ["mcp-server-prometheus"]
+    env:
+      PROMETHEUS_URL: "${PROMETHEUS_URL}"
+
+  - name: github
+    enabled: false
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"

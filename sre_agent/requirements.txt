@@ -1,0 +1,28 @@
+# SRE Agent — standalone dependencies
+
+# Workflow engine
+langgraph>=0.3.27
+langchain-core>=0.3.0
+langchain-openai>=0.2.0     # optional at runtime; heuristics used when unconfigured
+
+# Event-driven trigger
+azure-servicebus>=7.11.0
+azure-functions>=1.18.0     # only needed for the Functions trigger surface
+azure-identity>=1.15.0      # live observability queries
+azure-monitor-query>=1.2.0  # live observability queries
+
+# Models & config
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+pyyaml>=6.0.1
+
+# HTTP (ticketing / deployment correlation)
+httpx>=0.26.0
+
+# Optional extras
+# langchain-mcp-adapters>=0.1.0   # enable MCP connectors (sre_agent/mcp)
+# langgraph-checkpoint-postgres>=2.0.0  # durable approvals across restarts
+
+# Tests
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

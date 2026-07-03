@@ -1,0 +1,34 @@
+# Agent hooks — event-triggered automations at workflow lifecycle points.
+#
+# type: command  -> deterministic CLI operation; incident context is passed
+#                   in the SRE_HOOK_CONTEXT env var as JSON.
+# type: prompt   -> LLM-evaluated policy check returning structured JSON;
+#                   {"allow": false} at before_mitigation blocks execution.
+
+hooks:
+  - name: announce-investigation
+    event: investigation_started
+    type: command
+    command: >
+      echo "[hook] investigation started: $SRE_HOOK_CONTEXT" | head -c 300
+
+  - name: change-freeze-check
+    event: before_mitigation
+    type: prompt
+    prompt: >
+      Evaluate whether the proposed mitigation plan is safe to execute now.
+      Consider blast radius, whether it is reversible, and whether the root
+      cause confidence justifies action. Reject plans that delete data or
+      have no rollback path in production.
+
+  - name: emit-resolution-telemetry
+    event: after_resolution
+    type: command
+    command: >
+      echo "[hook] resolution telemetry emitted"
+
+  - name: page-oncall-on-escalation
+    event: on_escalation
+    type: command
+    command: >
+      echo "[hook] escalation - notify on-call channel"

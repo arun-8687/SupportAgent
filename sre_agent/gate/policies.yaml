@@ -1,0 +1,34 @@
+# Permission gate policy.
+#
+# Every proposed mitigation action is evaluated against these rules before
+# execution. First matching rule wins, except deny rules which always win.
+# Anything unmatched falls through to `default`.
+
+default: require_approval
+
+rules:
+  # Destructive operations are never run by the agent.
+  - name: block-destructive
+    action: "*delete*"
+    decision: deny
+
+  - name: block-destroy
+    action: "*destroy*"
+    decision: deny
+
+  # Low-risk diagnostics/reads can always run.
+  - name: allow-low-risk-nonprod
+    risk: [low]
+    environment: [dev, staging]
+    decision: allow
+
+  # Restarts in non-prod environments run without sign-off.
+  - name: allow-restarts-nonprod
+    action: "restart_*"
+    environment: [dev, staging]
+    decision: allow
+
+  # Anything touching prod needs a human.
+  - name: prod-requires-approval
+    environment: [prod]
+    decision: require_approval

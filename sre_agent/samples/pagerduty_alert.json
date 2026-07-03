@@ -1,0 +1,18 @@
+{
+  "event": {
+    "id": "01BRB6ZP4M6T8ZG4X6BP63ZB9O",
+    "event_type": "incident.triggered",
+    "occurred_at": "2026-07-03T02:47:12Z",
+    "data": {
+      "id": "PT4KHLK",
+      "type": "incident",
+      "title": "checkout-frontend elevated 5xx error rate (prod)",
+      "description": "Error rate above 5% for 10 minutes; users unable to complete checkout.",
+      "urgency": "high",
+      "service": {
+        "id": "PF9KMXH",
+        "summary": "checkout-frontend-prod"
+      }
+    }
+  }
+}
