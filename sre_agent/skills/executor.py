@@ -10,8 +10,10 @@ After every execution, PostToolUse hooks fire: a hook returning
 {"decision": "block"} marks the action result as blocked.
 """
 import asyncio
+import json
 import logging
 import shlex
+import shutil
 import time
 from typing import Optional
 
@@ -114,6 +116,30 @@ class SkillExecutor:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
 
+        settings = get_settings()
+        # Sandboxed hosts (Azure Functions workers) usually lack az/kubectl
+        # and their credentials. Dispatch mode publishes the approved action
+        # to the outbound topic for a separate privileged runner instead of
+        # executing here.
+        if settings.execution_mode == "dispatch":
+            return await self._dispatch(action, tool, command, started)
+
+        # Preflight: fail with a clear error when the binary isn't installed,
+        # instead of a cryptic shell "command not found" mid-incident.
+        binary = command.split()[0] if command.split() else ""
+        if binary and shutil.which(binary) is None:
+            return ActionResult(
+                action_id=action.action_id,
+                success=False,
+                error=(
+                    f"Executable '{binary}' not found on this host. Install it, "
+                    "or set SRE_AGENT_EXECUTION_MODE=dispatch to hand execution "
+                    "to a privileged runner."
+                ),
+                dry_run=False,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -137,6 +163,59 @@ class SkillExecutor:
                 action_id=action.action_id,
                 success=False,
                 error=f"Tool {tool.name} timed out after {COMMAND_TIMEOUT_SECONDS}s",
+                dry_run=False,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+
+    async def _dispatch(
+        self, action: MitigationAction, tool: SkillTool, command: str, started: float
+    ) -> ActionResult:
+        """Publish the approved action to the outbound topic for a runner.
+
+        The runner (a small privileged worker with az/kubectl and RBAC)
+        subscribes to execution_request events, runs the command, and
+        publishes the outcome. Verification in this mode should consume
+        the runner's completion events rather than probing immediately.
+        """
+        settings = get_settings()
+        payload = {
+            "event_type": "execution_request",
+            "action_id": action.action_id,
+            "skill": action.skill_name,
+            "tool": tool.name,
+            "command": command,
+            "risk": action.risk.value,
+        }
+        try:
+            from azure.servicebus import ServiceBusMessage
+            from azure.servicebus.aio import ServiceBusClient
+
+            async with ServiceBusClient.from_connection_string(
+                settings.servicebus_connection_string
+            ) as client:
+                sender = client.get_topic_sender(
+                    topic_name=settings.servicebus_outbound_topic
+                )
+                async with sender:
+                    await sender.send_messages(
+                        ServiceBusMessage(
+                            json.dumps(payload),
+                            application_properties={"event_type": "execution_request"},
+                        )
+                    )
+            return ActionResult(
+                action_id=action.action_id,
+                success=True,
+                output=f"[dispatched] {tool.name} sent to runner via "
+                       f"'{settings.servicebus_outbound_topic}'",
+                dry_run=False,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        except Exception as exc:
+            return ActionResult(
+                action_id=action.action_id,
+                success=False,
+                error=f"Failed to dispatch execution request: {exc}",
                 dry_run=False,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )

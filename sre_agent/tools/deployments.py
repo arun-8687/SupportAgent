@@ -11,6 +11,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sre_agent.tools.observability import _require_mock_allowed
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,8 +53,10 @@ class DeploymentClient:
                         if datetime.fromisoformat(d["created_at"].replace("Z", "+00:00")) > cutoff
                     ]
             except Exception:
-                logger.exception("GitHub deployments query failed; using mock data")
+                logger.exception("GitHub deployments query failed")
+                _require_mock_allowed("recent_deployments")
 
+        _require_mock_allowed("recent_deployments")
         deployed_at = datetime.now(timezone.utc) - timedelta(hours=2)
         return [
             {
@@ -72,6 +76,7 @@ class DeploymentClient:
         repo: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return commits in the lookback window, newest first."""
+        _require_mock_allowed("recent_commits")
         committed_at = datetime.now(timezone.utc) - timedelta(hours=2, minutes=20)
         return [
             {

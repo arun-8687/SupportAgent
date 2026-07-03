@@ -15,6 +15,7 @@ from sre_agent.memory.user_memories import UserMemoryStore
 from sre_agent.service import SREAgentService
 from sre_agent.skills.executor import SkillExecutor
 from sre_agent.skills.registry import SkillRegistry
+from sre_agent.stores import FileAlertLedger, FilePendingApprovalStore
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 
@@ -57,8 +58,20 @@ def hooks() -> HookEngine:
 
 
 @pytest.fixture
-def service(knowledge_store, agent_memory, skills, hooks) -> SREAgentService:
-    """Full workflow wired with dry-run executor and temp memory stores."""
+def alert_ledger(tmp_path) -> FileAlertLedger:
+    return FileAlertLedger(path=tmp_path / "alert_ledger.jsonl")
+
+
+@pytest.fixture
+def pending_approvals(tmp_path) -> FilePendingApprovalStore:
+    return FilePendingApprovalStore(path=tmp_path / "pending_approvals.jsonl")
+
+
+@pytest.fixture
+def service(
+    knowledge_store, agent_memory, skills, hooks, alert_ledger, pending_approvals
+) -> SREAgentService:
+    """Full workflow wired with dry-run executor and temp stores."""
     nodes = SREAgentNodes(
         skills=skills,
         gate=PermissionGate(autonomous_mode=False),
@@ -67,4 +80,20 @@ def service(knowledge_store, agent_memory, skills, hooks) -> SREAgentService:
         memory=agent_memory,
         executor=SkillExecutor(registry=skills, dry_run=True, hooks=hooks),
     )
-    return SREAgentService(nodes=nodes)
+    return SREAgentService(
+        nodes=nodes,
+        alert_ledger=alert_ledger,
+        pending_approvals=pending_approvals,
+    )
+
+
+@pytest.fixture
+def production_settings(monkeypatch):
+    """Switch settings to production strict mode for one test."""
+    from sre_agent.config import get_settings
+
+    monkeypatch.setenv("SRE_AGENT_ENVIRONMENT", "production")
+    get_settings.cache_clear()
+    yield get_settings()
+    monkeypatch.delenv("SRE_AGENT_ENVIRONMENT", raising=False)
+    get_settings.cache_clear()

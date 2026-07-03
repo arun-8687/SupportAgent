@@ -104,7 +104,9 @@ class AgentMemory:
     def capture_session_insight(self, insight: SessionInsight) -> SessionInsight:
         """Persist an insight and merge it into synthesized knowledge files."""
         self.insights_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.insights_path.open("a", encoding="utf-8") as fh:
+        from sre_agent.locking import file_lock
+
+        with file_lock(self.insights_path), self.insights_path.open("a", encoding="utf-8") as fh:
             fh.write(insight.model_dump_json() + "\n")
 
         body_lines = [

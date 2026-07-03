@@ -11,7 +11,27 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sre_agent.config import get_settings
+
 logger = logging.getLogger(__name__)
+
+
+class MockDataForbiddenError(RuntimeError):
+    """Live telemetry is unavailable and synthetic fallbacks are disallowed.
+
+    In production a credential expiry or query failure must fail the
+    investigation loudly — never produce a confident analysis grounded in
+    fake telemetry that could drive real mitigations.
+    """
+
+
+def _require_mock_allowed(context: str) -> None:
+    if not get_settings().mock_data_allowed:
+        raise MockDataForbiddenError(
+            f"{context}: live query unavailable and mock data is disallowed "
+            "(SRE_AGENT_ENVIRONMENT=production). Fix credentials/connectivity "
+            "or explicitly set SRE_AGENT_ALLOW_MOCK_DATA=true."
+        )
 
 
 def _synthetic_series(name: str, minutes: int, base: float, drift: float) -> List[Dict[str, Any]]:
@@ -73,8 +93,11 @@ class ObservabilityClient:
                     series[metric.name] = points
                 return series
             except Exception:
+                if not get_settings().mock_data_allowed:
+                    raise
                 logger.exception("Live metrics query failed; falling back to mock")
 
+        _require_mock_allowed("query_metrics")
         return {
             name: _synthetic_series(name, lookback_minutes, base=45.0, drift=40.0)
             for name in metric_names
@@ -104,8 +127,11 @@ class ObservabilityClient:
                         rows.append(dict(zip(columns, row)))
                 return rows
             except Exception:
+                if not get_settings().mock_data_allowed:
+                    raise
                 logger.exception("Live logs query failed; falling back to mock")
 
+        _require_mock_allowed("query_logs")
         now = datetime.now(timezone.utc)
         return [
             {
@@ -131,6 +157,7 @@ class ObservabilityClient:
     async def check_health(self, resource_id: Optional[str]) -> Dict[str, Any]:
         """Simple health probe used by the verification step."""
         # In live mode this would hit availability tests / resource health API.
+        _require_mock_allowed("check_health")
         return {
             "resource_id": resource_id,
             "status": "healthy",

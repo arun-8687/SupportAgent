@@ -95,8 +95,10 @@ class PermissionGate:
                 reason=f"Matched policy rule '{rule.name}'",
             )
 
-        # No rule matched: autonomous mode auto-approves low risk only.
-        if self.autonomous_mode and action.risk == RiskLevel.LOW:
+        # No rule matched: autonomous mode auto-approves low risk only —
+        # and never in production. Autonomy is for well-tested, non-prod
+        # operations; prod always keeps a human in the loop.
+        if self.autonomous_mode and action.risk == RiskLevel.LOW and environment != "prod":
             return GateDecision(
                 action_id=action.action_id,
                 outcome=GateOutcome.ALLOW,

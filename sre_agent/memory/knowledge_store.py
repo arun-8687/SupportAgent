@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from sre_agent.config import get_settings
+from sre_agent.locking import file_lock
 from sre_agent.models import KnowledgeMatch, KnowledgeRecord
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class KnowledgeStore:
 
     def save(self, record: KnowledgeRecord) -> KnowledgeRecord:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
+        with file_lock(self.path), self.path.open("a", encoding="utf-8") as fh:
             fh.write(record.model_dump_json() + "\n")
         logger.info("Knowledge captured: %s (%s)", record.record_id, record.title)
         return record

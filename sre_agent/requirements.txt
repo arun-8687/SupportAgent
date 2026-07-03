@@ -19,9 +19,13 @@ pyyaml>=6.0.1
 # HTTP (ticketing / deployment correlation)
 httpx>=0.26.0
 
+# Production (required when SRE_AGENT_ENVIRONMENT=production)
+# langgraph-checkpoint-postgres>=2.0.0  # durable checkpointer (brings psycopg,
+#                                       # also used by the alert ledger and
+#                                       # pending-approval stores)
+
 # Optional extras
 # langchain-mcp-adapters>=0.1.0   # enable MCP connectors (sre_agent/mcp)
-# langgraph-checkpoint-postgres>=2.0.0  # durable approvals across restarts
 
 # Tests
 pytest>=8.0.0

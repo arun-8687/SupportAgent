@@ -25,14 +25,75 @@ import logging
 from typing import List, Optional, Union
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
+from sre_agent.config import get_settings
 from sre_agent.graph.nodes import SREAgentNodes
 from sre_agent.graph.state import SREState
 from sre_agent.models import GateOutcome
 
 logger = logging.getLogger(__name__)
+
+
+def _serializer() -> JsonPlusSerializer:
+    """Serde with our state models explicitly registered.
+
+    Future langgraph versions block deserializing unregistered types from
+    checkpoints; registering sre_agent.models keeps resume working across
+    upgrades (and silences the current warnings).
+    """
+    import enum
+
+    import pydantic
+
+    import sre_agent.models as models
+
+    allowed = [
+        ("sre_agent.models", name)
+        for name, obj in vars(models).items()
+        if isinstance(obj, type)
+        and issubclass(obj, (pydantic.BaseModel, enum.Enum))
+        and obj.__module__ == "sre_agent.models"
+    ]
+    return JsonPlusSerializer(allowed_msgpack_modules=allowed)
+
+
+def create_checkpointer():
+    """
+    Build the checkpointer the graph needs for interrupt/resume.
+
+    - SRE_AGENT_DATABASE_URL set -> Postgres (durable: approvals survive
+      restarts and resume on any instance).
+    - unset in development       -> MemorySaver (single-process only).
+    - unset in production        -> hard failure. A silently non-durable
+      checkpointer means paused approvals die on scale-in/restart.
+    """
+    settings = get_settings()
+    if settings.database_url:
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+        except ImportError as exc:
+            raise RuntimeError(
+                "SRE_AGENT_DATABASE_URL is set but langgraph-checkpoint-postgres "
+                "is not installed (pip install langgraph-checkpoint-postgres)."
+            ) from exc
+        checkpointer = PostgresSaver.from_conn_string(settings.database_url)
+        # from_conn_string returns a context manager in recent versions;
+        # enter it eagerly for a long-lived saver.
+        if hasattr(checkpointer, "__enter__") and not hasattr(checkpointer, "get_tuple"):
+            checkpointer = checkpointer.__enter__()  # pragma: no cover
+        checkpointer.setup()
+        return checkpointer
+
+    if settings.is_production:
+        raise RuntimeError(
+            "Production requires a durable checkpointer: set "
+            "SRE_AGENT_DATABASE_URL (Postgres). MemorySaver loses paused "
+            "approvals on restart/scale-out."
+        )
+    return MemorySaver(serde=_serializer())
 
 
 # --------------------------------------------------------------------------- #
@@ -100,9 +161,10 @@ def build_workflow(
     """
     Build and compile the SRE incident graph.
 
-    A checkpointer is required because await_approval uses interrupt();
-    MemorySaver is the default — pass a PostgresSaver in production so
-    paused approvals survive restarts.
+    A checkpointer is required because await_approval uses interrupt().
+    When none is passed, create_checkpointer() picks one from settings
+    (Postgres when SRE_AGENT_DATABASE_URL is set; MemorySaver in dev;
+    hard failure in production without a durable store).
     """
     nodes = nodes or SREAgentNodes()
     graph = StateGraph(SREState)
@@ -169,4 +231,4 @@ def build_workflow(
     graph.add_edge("resolve", END)
     graph.add_edge("escalate", END)
 
-    return graph.compile(checkpointer=checkpointer or MemorySaver())
+    return graph.compile(checkpointer=checkpointer or create_checkpointer())

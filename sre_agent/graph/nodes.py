@@ -37,6 +37,7 @@ from sre_agent.models import (
     TriageAssessment,
     VerificationReport,
 )
+from sre_agent.security import EXTERNAL_DATA_CAUTION, external_data_block
 from sre_agent.skills.executor import SkillExecutor
 from sre_agent.skills.registry import SkillRegistry
 from sre_agent.subagents.registry import SubagentRegistry
@@ -181,9 +182,11 @@ class SREAgentNodes:
                 "(handoff descriptions):\n" + self.subagents.descriptions()
                 + (f"\n\nEnvironment overview:\n{overview}" if overview else "")
                 + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
+                + f"\n\n{EXTERNAL_DATA_CAUTION}"
             ),
             user_prompt=(
-                f"Incident: {triage.summary}\nAlert: {incident.alert.description}"
+                f"Incident: {triage.summary}\n"
+                f"Alert (untrusted):\n{external_data_block(incident.alert.description)}"
                 + (f"\n\nRelevant memory:\n{memory_context}" if memory_context else "")
             ),
             schema=InvestigationPlan,

@@ -161,13 +161,58 @@ Environment variables (prefix `SRE_AGENT_`, see `config.py`):
 - **Connect an MCP server**: enable an entry in `mcp/servers.yaml` and
   install `langchain-mcp-adapters`.
 
-## Production notes
+## Production hardening
 
-- Use a **Postgres checkpointer** (`SRE_AGENT_DATABASE_URL`) so investigations
-  paused for approval survive restarts and scale across instances; the default
-  `MemorySaver` is per-process.
+Set `SRE_AGENT_ENVIRONMENT=production` to enable strict mode. What changes:
+
+- **No silent degradation**: missing/failed LLM raises instead of falling
+  back to heuristics; failed telemetry queries raise instead of returning
+  synthetic data (`MockDataForbiddenError`). Escape hatch:
+  `SRE_AGENT_ALLOW_MOCK_DATA=true`.
+- **Durable checkpointer required**: startup fails without
+  `SRE_AGENT_DATABASE_URL` (Postgres) — `MemorySaver` silently loses paused
+  approvals on restart/scale-out. State models are registered with the
+  checkpoint serializer so resume survives langgraph upgrades.
+- **Verified approver identity required**: HTTP approvals must carry the
+  Entra `X-MS-CLIENT-PRINCIPAL` header (App Service Authentication);
+  body-supplied approver names are rejected.
+
+Always-on protections (any environment):
+
+- **Idempotent intake**: an alert ledger claims each `alert_id` atomically —
+  Service Bus at-least-once redeliveries map back to the original incident
+  instead of spawning duplicate investigations/tickets.
+- **Storm suppression**: after `SRE_AGENT_STORM_THRESHOLD` alerts for the
+  same service+alert within `SRE_AGENT_STORM_WINDOW_SECONDS`, further ones
+  are suppressed and linked to the parent incident.
+- **Approval timeouts**: a sweeper (Functions timer / listener loop)
+  escalates investigations that waited longer than
+  `SRE_AGENT_APPROVAL_TIMEOUT_SECONDS`, so nothing hangs forever.
+- **LLM throttling**: a global concurrency semaphore
+  (`SRE_AGENT_LLM_MAX_CONCURRENCY`) plus retry with exponential backoff
+  bound spend and survive 429s during storms.
+- **Fast-ack listener**: messages are completed after parsing (dedup makes
+  that safe), so the Service Bus lock can't expire mid-investigation;
+  unparseable payloads are dead-lettered with a reason.
+- **Prompt-injection hygiene**: alert text and collected telemetry are
+  sanitized and fenced in `<external_data>` blocks in every LLM prompt;
+  autonomous mode never auto-approves actions in `prod` environments.
+- **Execution safety**: missing binaries (az/kubectl) fail preflight with a
+  clear error; `SRE_AGENT_EXECUTION_MODE=dispatch` hands approved actions
+  to a separate privileged runner via the outbound topic instead of
+  executing in-process (recommended on Functions).
+- **Checkpoint retention**: threads older than
+  `SRE_AGENT_CHECKPOINT_RETENTION_DAYS` are pruned (pending approvals are
+  protected); concurrent writers to the markdown/JSONL stores are
+  serialized with file locks (use NFS mounts, not SMB — or Postgres-backed
+  stores, which kick in automatically when `SRE_AGENT_DATABASE_URL` is set).
+
+Deployment guide for Azure Functions (plan choice, `host.json`, Azure Files
+mount, Easy Auth): see [`deploy/README.md`](deploy/README.md).
+
+Other notes:
+
 - Swap the knowledge store's JSONL backend for pgvector/Azure AI Search for
   semantic recall at scale.
 - Set `SRE_AGENT_DRY_RUN=false` only after reviewing the gate policy — the
-  gate is the safety layer between a proposed action and a live `az`/`kubectl`
-  command.
+  gate is the safety layer between a proposed action and a live command.

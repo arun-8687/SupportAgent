@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from sre_agent.config import get_settings
+from sre_agent.locking import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,14 @@ class SynthesizedKnowledge:
         path = self.directory / filename
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        if path.exists():
-            content = path.read_text(encoding="utf-8").rstrip()
-        else:
-            content = f"# {topic}\n"
-        section_title = heading or f"Insight ({stamp})"
-        content += f"\n\n## {section_title}\n\n{insight.strip()}\n"
-        path.write_text(content, encoding="utf-8")
+        with file_lock(path):
+            if path.exists():
+                content = path.read_text(encoding="utf-8").rstrip()
+            else:
+                content = f"# {topic}\n"
+            section_title = heading or f"Insight ({stamp})"
+            content += f"\n\n## {section_title}\n\n{insight.strip()}\n"
+            path.write_text(content, encoding="utf-8")
 
         self._ensure_overview_link(filename, topic)
         logger.info("Synthesized knowledge updated: %s", filename)
@@ -99,17 +101,18 @@ class SynthesizedKnowledge:
         """overview.md links every topic file so the agent knows it exists."""
         self.directory.mkdir(parents=True, exist_ok=True)
         path = self.directory / OVERVIEW_FILE
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-        else:
-            content = (
-                "# Environment overview\n\n"
-                "Knowledge synthesized from past investigations. Detailed notes "
-                "live in the linked topic files.\n\n## Topics\n"
-            )
-        link = f"- [{topic}]({filename})"
-        if filename not in content:
-            if "## Topics" not in content:
-                content += "\n## Topics\n"
-            content = content.rstrip() + f"\n{link}\n"
-            path.write_text(content[:OVERVIEW_BUDGET_CHARS * 4], encoding="utf-8")
+        with file_lock(path):
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+            else:
+                content = (
+                    "# Environment overview\n\n"
+                    "Knowledge synthesized from past investigations. Detailed notes "
+                    "live in the linked topic files.\n\n## Topics\n"
+                )
+            link = f"- [{topic}]({filename})"
+            if filename not in content:
+                if "## Topics" not in content:
+                    content += "\n## Topics\n"
+                content = content.rstrip() + f"\n{link}\n"
+                path.write_text(content[:OVERVIEW_BUDGET_CHARS * 4], encoding="utf-8")

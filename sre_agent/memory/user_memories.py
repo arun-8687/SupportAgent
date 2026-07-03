@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from sre_agent.config import get_settings
+from sre_agent.locking import file_lock
 from sre_agent.models import UserMemory
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class UserMemoryStore:
             memory_id=f"mem-{uuid.uuid4().hex[:10]}", fact=fact.strip(), saved_by=saved_by
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
+        with file_lock(self.path), self.path.open("a", encoding="utf-8") as fh:
             fh.write(memory.model_dump_json() + "\n")
         return memory
 
@@ -52,20 +53,21 @@ class UserMemoryStore:
 
     def forget(self, query: str) -> int:
         """#forget <description> — remove matching memories; returns count."""
-        keep, removed = [], 0
-        query_tokens = set(_WORD_RE.findall(query.lower()))
-        for memory in self.load_all():
-            fact_tokens = set(_WORD_RE.findall(memory.fact.lower()))
-            # Forget when most of the query matches the fact.
-            if query_tokens and len(query_tokens & fact_tokens) >= max(1, len(query_tokens) // 2):
-                removed += 1
-            else:
-                keep.append(memory)
-        if removed:
-            with self.path.open("w", encoding="utf-8") as fh:
-                for memory in keep:
-                    fh.write(memory.model_dump_json() + "\n")
-        return removed
+        with file_lock(self.path):
+            keep, removed = [], 0
+            query_tokens = set(_WORD_RE.findall(query.lower()))
+            for memory in self.load_all():
+                fact_tokens = set(_WORD_RE.findall(memory.fact.lower()))
+                # Forget when most of the query matches the fact.
+                if query_tokens and len(query_tokens & fact_tokens) >= max(1, len(query_tokens) // 2):
+                    removed += 1
+                else:
+                    keep.append(memory)
+            if removed:
+                with self.path.open("w", encoding="utf-8") as fh:
+                    for memory in keep:
+                        fh.write(memory.model_dump_json() + "\n")
+            return removed
 
     def load_all(self) -> List[UserMemory]:
         if not self.path.exists():

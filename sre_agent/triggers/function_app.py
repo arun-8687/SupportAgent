@@ -2,19 +2,28 @@
 Azure Functions trigger surface (serverless alternative to the listener).
 
 - Service Bus TOPIC trigger: alerts published to the incidents topic start
-  investigations automatically.
-- HTTP endpoints: approve/reject paused mitigations and inspect status —
-  the "single action approval" the on-call engineer takes from the ticket.
+  investigations automatically (idempotent — redeliveries are deduped).
+- HTTP endpoints: approve/reject paused mitigations and inspect status.
+  The approver identity comes from App Service Authentication's
+  X-MS-CLIENT-PRINCIPAL header (Entra), never from the request body —
+  approving a production mitigation is a privileged action.
+- Timer trigger: sweeps approvals past their timeout (escalates them) and
+  prunes old checkpoints.
 
-Note: for approvals to resume across function instances, configure a
-Postgres checkpointer (SRE_AGENT_DATABASE_URL); MemorySaver only works
-within one long-lived instance.
+Production requirements (enforced at startup by create_checkpointer):
+- SRE_AGENT_DATABASE_URL (Postgres) so approvals resume on any instance.
+- SRE_AGENT_DATA_DIR on durable shared storage (Azure Files mount) so
+  knowledge/memory files survive instance recycling.
+- host.json: see sre_agent/deploy/host.json for the Service Bus lock
+  renewal, concurrency, and timeout settings this workload needs.
 """
 import json
 import logging
 
 import azure.functions as func
 
+from sre_agent.config import get_settings
+from sre_agent.security import parse_client_principal
 from sre_agent.service import SREAgentService
 
 app = func.FunctionApp()
@@ -38,18 +47,28 @@ def get_service() -> SREAgentService:
 )
 async def on_incident_alert(message: func.ServiceBusMessage) -> None:
     """Investigation kicks off the moment an alert lands on the topic."""
-    payload = json.loads(message.get_body().decode("utf-8"))
+    try:
+        payload = json.loads(message.get_body().decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # Unparseable payloads can never succeed; log and swallow so the
+        # host completes the message instead of redelivering to max count.
+        logging.error("Poison message %s: unparseable body", message.message_id)
+        return
+
     props = message.application_properties or {}
     source_hint = str(props.get("source", ""))
 
     service = get_service()
     if str(props.get("event_type", "alert")) == "approval":
         result = await service.submit_approval(
-            incident_id=payload["incident_id"],
+            incident_id=str(payload["incident_id"]),
             approved=bool(payload.get("approved", False)),
             approver=str(payload.get("approver", "service-bus")),
             reason=str(payload.get("reason", "")),
             channel="service_bus",
+            # Publishing rights to the topic are the credential here;
+            # restrict senders with Service Bus RBAC.
+            approver_verified=True,
         )
     else:
         result = await service.handle_alert(payload, source_hint=source_hint)
@@ -59,7 +78,11 @@ async def on_incident_alert(message: func.ServiceBusMessage) -> None:
 @app.function_name("ApproveMitigation")
 @app.route(route="incidents/{incident_id}/approval", methods=["POST"])
 async def approve_mitigation(req: func.HttpRequest) -> func.HttpResponse:
-    """POST {"approved": true, "approver": "...", "reason": "..."}"""
+    """POST {"approved": true, "reason": "..."}
+
+    The approver is the Entra principal from Easy Auth — a body-supplied
+    approver name is only honored in non-production environments.
+    """
     incident_id = req.route_params.get("incident_id", "")
     try:
         body = req.get_json()
@@ -69,12 +92,34 @@ async def approve_mitigation(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400, mimetype="application/json",
         )
 
+    principal = parse_client_principal(req.headers.get("x-ms-client-principal"))
+    settings = get_settings()
+    if principal is None and settings.verified_identity_required:
+        return func.HttpResponse(
+            json.dumps(
+                {
+                    "error": (
+                        "Verified identity required. Enable App Service "
+                        "Authentication (Entra) on this Function App; the "
+                        "X-MS-CLIENT-PRINCIPAL header is missing."
+                    )
+                }
+            ),
+            status_code=401, mimetype="application/json",
+        )
+
+    approver = (
+        principal["identity"]
+        if principal
+        else f"unverified:{body.get('approver', 'unknown')}"
+    )
     result = await get_service().submit_approval(
         incident_id=incident_id,
         approved=bool(body.get("approved", False)),
-        approver=str(body.get("approver", "unknown")),
+        approver=approver,
         reason=str(body.get("reason", "")),
         channel="http",
+        approver_verified=principal is not None,
     )
     return func.HttpResponse(
         json.dumps(result, default=str), mimetype="application/json"
@@ -94,3 +139,19 @@ async def incident_status(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps(status, default=str), mimetype="application/json"
     )
+
+
+@app.function_name("ApprovalSweep")
+@app.timer_trigger(arg_name="timer", schedule="0 */5 * * * *")  # every 5 min
+async def approval_sweep(timer: func.TimerRequest) -> None:
+    """Escalate timed-out approvals; prune old checkpoints hourly-ish."""
+    service = get_service()
+    escalated = await service.sweep_expired_approvals()
+    if escalated:
+        logging.warning("Sweeper escalated %d timed-out approvals", len(escalated))
+
+    from sre_agent.maintenance import prune_checkpoints
+
+    pruned = prune_checkpoints()
+    if pruned:
+        logging.info("Pruned %d expired checkpoint rows", pruned)

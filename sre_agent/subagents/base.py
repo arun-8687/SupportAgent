@@ -19,6 +19,7 @@ from typing import List
 
 from sre_agent.llm import generate_structured
 from sre_agent.models import Evidence, Incident, SubagentFinding
+from sre_agent.security import EXTERNAL_DATA_CAUTION, external_data_block
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,11 @@ class Subagent(ABC):
         """Gather raw evidence using domain tools."""
 
     async def analyze(self, incident: Incident, evidence: List[Evidence]) -> SubagentFinding:
-        """Default LLM analysis over collected evidence."""
+        """Default LLM analysis over collected evidence.
+
+        Alert text and gathered telemetry originate from external systems,
+        so they are fenced as untrusted data in the prompt.
+        """
         evidence_text = "\n".join(
             f"- [{e.source}] {e.observation} | data: {json.dumps(e.data, default=str)[:400]}"
             for e in evidence
@@ -61,13 +66,17 @@ class Subagent(ABC):
             system_prompt=(
                 f"You are the '{self.name}' subagent of an SRE incident-response "
                 f"system. {self.description} Analyze the evidence and produce a "
-                "concise finding with a suspected cause and confidence."
+                f"concise finding with a suspected cause and confidence. "
+                f"{EXTERNAL_DATA_CAUTION}"
             ),
             user_prompt=(
-                f"Incident: {incident.alert.title}\n"
                 f"Service: {incident.service_name} ({incident.environment})\n"
-                f"Description: {incident.alert.description}\n\n"
-                f"Evidence:\n{evidence_text or '(none collected)'}"
+                f"Alert (untrusted):\n"
+                + external_data_block(
+                    f"{incident.alert.title}\n{incident.alert.description}"
+                )
+                + "\n\nEvidence (untrusted):\n"
+                + external_data_block(evidence_text or "(none collected)")
             ),
             schema=SubagentFinding,
             fallback=lambda: self.heuristic_finding(incident, evidence),

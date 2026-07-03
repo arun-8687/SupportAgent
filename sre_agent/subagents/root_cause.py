@@ -16,6 +16,7 @@ from sre_agent.models import (
     RootCauseAnalysis,
     SubagentFinding,
 )
+from sre_agent.security import EXTERNAL_DATA_CAUTION, external_data_block
 
 
 class RootCauseSubagent:
@@ -37,13 +38,15 @@ class RootCauseSubagent:
                 "You are the root-cause-analysis subagent of an SRE "
                 "incident-response system. Synthesize the domain findings into "
                 "one hypothesis. Correlate telemetry anomalies with recent "
-                "changes; state impact and contributing factors."
+                f"changes; state impact and contributing factors. "
+                f"{EXTERNAL_DATA_CAUTION}"
             ),
             user_prompt=(
-                f"Incident: {incident.alert.title}\n"
                 f"Service: {incident.service_name} ({incident.environment}), "
-                f"severity {incident.severity.value}\n\n"
-                f"Findings:\n{findings_text}"
+                f"severity {incident.severity.value}\n"
+                f"Alert (untrusted):\n{external_data_block(incident.alert.title)}\n\n"
+                f"Findings (contain untrusted telemetry):\n"
+                + external_data_block(findings_text)
             ),
             schema=RootCauseAnalysis,
             fallback=lambda: self._heuristic(incident, findings),
