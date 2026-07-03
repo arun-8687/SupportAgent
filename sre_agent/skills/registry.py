@@ -1,12 +1,17 @@
 """
 Skills registry.
 
-A skill combines knowledge with optional tools:
+A skill is a directory whose SKILL.md combines metadata and knowledge in
+one markdown file — YAML frontmatter for the structured fields, markdown
+body for the procedural guidance:
 
     skills/builtin/<skill-name>/
-        manifest.yaml   -> name, description, files, tools
-        SKILL.md        -> procedural guidance the agent follows
+        SKILL.md        -> frontmatter (name, description, tools, ...) +
+                           guidance body the agent follows
         *.md            -> supporting files (runbooks, reference material)
+
+A legacy layout with a separate manifest.yaml next to a plain SKILL.md is
+still accepted (manifest wins when both carry metadata).
 
 The agent decides which skill to load based on the skill's description
 and the incident at hand — no explicit command needed. Loaded skills
@@ -29,6 +34,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from sre_agent.config import get_settings
+from sre_agent.frontmatter import parse_frontmatter
 from sre_agent.models import RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -67,11 +73,14 @@ class SkillDefinition(BaseModel):
     path: Optional[Path] = None
 
     def read_skill_md(self) -> str:
-        """Procedural guidance; loaded when the skill activates."""
+        """Procedural guidance (frontmatter stripped); loaded on activation."""
         if self.path is None:
             return ""
         skill_md = self.path / "SKILL.md"
-        return skill_md.read_text(encoding="utf-8") if skill_md.exists() else ""
+        if not skill_md.exists():
+            return ""
+        _meta, body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+        return body
 
     def read_supporting_files(self) -> Dict[str, str]:
         """Runbooks / reference material shipped alongside SKILL.md."""
@@ -109,16 +118,31 @@ class SkillRegistry:
             logger.warning("Skills directory %s does not exist", self.skills_dir)
             return
         for skill_dir in sorted(p for p in self.skills_dir.iterdir() if p.is_dir()):
-            manifest = skill_dir / "manifest.yaml"
-            if not manifest.exists():
-                continue
             try:
-                data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+                data = self._read_metadata(skill_dir)
+                if data is None:
+                    continue
                 skill = SkillDefinition.model_validate({**data, "path": skill_dir})
                 self._skills[skill.name] = skill
             except Exception:
                 logger.exception("Failed to load skill from %s", skill_dir)
         logger.info("Loaded %d skills", len(self._skills))
+
+    @staticmethod
+    def _read_metadata(skill_dir: Path) -> Optional[dict]:
+        """Skill metadata: SKILL.md frontmatter, or legacy manifest.yaml."""
+        manifest = skill_dir / "manifest.yaml"
+        if manifest.exists():
+            return yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.exists():
+            meta, _body = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+            if meta:
+                return meta
+            logger.warning(
+                "%s has no frontmatter and no manifest.yaml; skipping", skill_dir
+            )
+        return None
 
     # -- catalog ---------------------------------------------------------- #
 

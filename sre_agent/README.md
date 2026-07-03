@@ -257,9 +257,9 @@ flowchart TB
 | Azure SRE Agent concept | Implementation here | Where |
 | --- | --- | --- |
 | Incident trigger (PagerDuty / ServiceNow / Azure Monitor) | Service Bus **topic** subscription; payloads normalized per source | `triggers/`, `integrations/normalizers.py` |
-| **Skills** (`SKILL.md` + manifest + attached tools) | Skill directories: `manifest.yaml` + `SKILL.md` guidance + supporting `.md` files; loaded by relevance, max 5 active with LRU auto-unload | `skills/` |
+| **Skills** (`SKILL.md` + attached tools) | Single `SKILL.md` per skill: YAML frontmatter (name, description, tools) + markdown guidance body + supporting `.md` files; loaded by relevance, max 5 active with LRU auto-unload | `skills/` |
 | **Built-in subagents** (architecture, logs & metrics, source code, RCA, scanning) | Five built-in Python subagents + registry | `subagents/` |
-| **Custom agents** (YAML: `system_prompt`, `handoff_description`, `allowed_skills`, `tools`) | YAML files in `subagents/custom/`, auto-registered | `subagents/custom_loader.py` |
+| **Custom agents** (`handoff_description`, `allowed_skills`, `tools`; body = system prompt) | Markdown files in `subagents/custom/` (frontmatter + prompt body), auto-registered; legacy YAML accepted | `subagents/custom_loader.py` |
 | Python tools | Observability, deployment-correlation, ticketing clients | `tools/` |
 | MCP servers | YAML server config + adapter loader | `mcp/` |
 | **Agent hooks** (`Stop`, `PostToolUse`; prompt/command executors; `matcher`, `failMode`, `$ARGUMENTS`, exit-code-2 blocks) | Full documented contract + lifecycle events | `hooks/` |
@@ -279,17 +279,18 @@ flowchart TB
 
 ### Skills
 
-A skill is a directory combining knowledge with executable tools:
+A skill is a directory whose `SKILL.md` combines metadata and knowledge in
+**one markdown file** — YAML frontmatter for the structured fields, markdown
+body for the procedural guidance:
 
 ```
 skills/builtin/aks-memory-pressure/
-├── manifest.yaml        # name, description, files, tools
-├── SKILL.md             # procedural guidance the agent follows
+├── SKILL.md             # frontmatter (name, tools, ...) + guidance body
 └── oomkill-runbook.md   # supporting reference material
 ```
 
-```yaml
-# manifest.yaml
+```markdown
+---
 name: aks-memory-pressure
 description: Use when investigating AKS/Kubernetes memory pressure, OOMKilled pods...
 applies_to: [memory, oomkilled, crashloop, aks, kubernetes]
@@ -305,7 +306,14 @@ tools:
     command: "kubectl top pods -n {namespace} --sort-by=memory"
     parameters: [namespace]
     risk: low
+---
+# AKS memory pressure troubleshooting
+
+1. Confirm the trend: check `MemoryWorkingSet` over the last 90 minutes...
+2. Check pod events for `OOMKilled` — run the `get_pod_memory` tool...
 ```
+
+(A legacy layout with a separate `manifest.yaml` is still accepted.)
 
 Behavior mirrored from the Azure model: the agent selects skills by
 **relevance** (description/`applies_to` vs. the incident — no explicit
@@ -316,18 +324,22 @@ skill's tools are executable only while it's active (executing re-reads
 
 ### Custom agents
 
-Domain specialists defined in YAML — no code:
+Domain specialists defined in markdown — frontmatter for metadata, the
+**body is the system prompt**. No code:
 
-```yaml
-# subagents/custom/database_expert.yaml
+```markdown
+---
+# subagents/custom/database_expert.md
 name: database_expert
-system_prompt: |
-  You are a database specialist. Analyze query performance, diagnose
-  connection issues and pool exhaustion, and recommend optimizations.
 handoff_description: Handles SQL and database troubleshooting (latency, pools, deadlocks)
 allowed_skills: []          # setting this auto-enables skills
 tools: [query_metrics, query_logs]
+---
+You are a database specialist. Analyze query performance, diagnose
+connection issues and pool exhaustion, and recommend optimizations.
 ```
+
+(Legacy plain-YAML definitions with a `system_prompt` field still load.)
 
 Custom agents register alongside the built-ins; the planner sees their
 `handoff_description` when composing an investigation, `allowed_skills`
@@ -527,13 +539,14 @@ sre_agent/
 │   ├── base.py                # collect() + analyze() template
 │   ├── logs_metrics.py / source_code.py / architecture.py / scanning.py
 │   ├── root_cause.py          # synthesis subagent
-│   ├── custom_loader.py       # YAML custom agents
-│   ├── custom/                # drop custom agent YAML here
+│   ├── custom_loader.py       # markdown custom agents (legacy YAML too)
+│   ├── custom/                # drop custom agent .md files here
 │   └── registry.py
+├── frontmatter.py             # markdown frontmatter parsing (skills/agents)
 ├── skills/
 │   ├── registry.py            # SKILL.md loading, relevance, 5-active LRU
 │   ├── executor.py            # dry-run / local / dispatch + PostToolUse
-│   └── builtin/<skill>/       # manifest.yaml + SKILL.md + supporting files
+│   └── builtin/<skill>/       # SKILL.md (frontmatter+body) + supporting files
 ├── hooks/
 │   ├── engine.py              # Stop / PostToolUse / lifecycle contract
 │   └── hooks.yaml
@@ -595,11 +608,12 @@ Files, Easy Auth) see **[deploy/README.md](deploy/README.md)**.
 
 ## Extending the agent
 
-- **Add a skill** — create `skills/builtin/<name>/` with `manifest.yaml` and
-  `SKILL.md`. Attach tools in the manifest; no code required.
-- **Add a custom agent** — drop a YAML file in `subagents/custom/`
-  (`name`, `system_prompt`, `handoff_description`, optional `allowed_skills`
-  and `tools`). Registers automatically.
+- **Add a skill** — create `skills/builtin/<name>/SKILL.md`: frontmatter
+  with `name`, `description`, `applies_to`, and `tools`; guidance in the
+  body. No code required.
+- **Add a custom agent** — drop a markdown file in `subagents/custom/`:
+  frontmatter with `name`, `handoff_description`, optional `allowed_skills`
+  and `tools`; the body is the system prompt. Registers automatically.
 - **Add a hook** — declare it in `hooks/hooks.yaml` (`Stop`, `PostToolUse`
   with `matcher`, or a lifecycle event; `prompt` or `command` executor).
 - **Teach it your environment** — upload runbooks to the knowledge base,

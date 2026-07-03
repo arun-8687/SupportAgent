@@ -1,22 +1,26 @@
 """
-Custom agents defined in YAML.
+Custom agents defined in markdown.
 
-Operators add domain specialists without writing code by dropping a YAML
-definition into the custom-agents directory:
+Operators add domain specialists without writing code by dropping a
+markdown file into the custom-agents directory — YAML frontmatter for the
+structured fields, markdown body as the agent's system prompt:
 
+    ---
     name: database_expert
-    system_prompt: |
-      You are a database specialist. Analyze query performance, diagnose
-      connection issues, and recommend optimizations.
     handoff_description: Handles SQL and database troubleshooting
     allowed_skills:
       - postgres-troubleshooting
     tools:
       - query_metrics
-    enable_skills: true
+    ---
+    You are a database specialist. Analyze query performance, diagnose
+    connection issues, and recommend optimizations.
+
+Legacy plain-YAML definitions (with a `system_prompt` field) are still
+accepted.
 
 Key properties:
-  system_prompt        -> the expert persona and instructions
+  body / system_prompt -> the expert persona and instructions
   handoff_description  -> what the planner/orchestrator sees when deciding
                           whether to delegate to this agent
   allowed_skills       -> skills this agent may load (setting it enables
@@ -35,6 +39,7 @@ from typing import List, Optional
 import yaml
 from pydantic import BaseModel, Field
 
+from sre_agent.frontmatter import parse_frontmatter
 from sre_agent.models import Evidence, Incident, SubagentFinding
 from sre_agent.skills.registry import SkillRegistry
 from sre_agent.subagents.base import Subagent
@@ -158,21 +163,35 @@ class YamlSubagent(Subagent):
         )
 
 
+def _read_definition(path: Path) -> CustomAgentDefinition:
+    """Parse a custom-agent file: .md (frontmatter + body) or legacy .yaml."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".md":
+        meta, body = parse_frontmatter(text)
+        if not meta:
+            raise ValueError(f"{path.name} has no YAML frontmatter")
+        # The markdown body IS the system prompt; an explicit
+        # system_prompt field in the frontmatter wins if present.
+        data = {"system_prompt": body.strip(), **meta}
+    else:
+        data = yaml.safe_load(text)
+    return CustomAgentDefinition.model_validate(data)
+
+
 def load_custom_agents(
     directory: Optional[Path] = None,
     skills: Optional[SkillRegistry] = None,
 ) -> List[YamlSubagent]:
-    """Load every custom-agent YAML in the directory."""
+    """Load every custom-agent definition (.md preferred, .yaml legacy)."""
     from sre_agent.config import get_settings
 
     directory = directory or get_settings().custom_agents_dir
     if not directory.exists():
         return []
     agents = []
-    for path in sorted(directory.glob("*.yaml")):
+    for path in sorted(list(directory.glob("*.md")) + list(directory.glob("*.yaml"))):
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-            definition = CustomAgentDefinition.model_validate(data)
+            definition = _read_definition(path)
             agents.append(YamlSubagent(definition, skills=skills))
         except Exception:
             logger.exception("Failed to load custom agent from %s", path)

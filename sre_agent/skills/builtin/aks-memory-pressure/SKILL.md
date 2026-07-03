@@ -1,3 +1,30 @@
+---
+name: aks-memory-pressure
+description: Use when investigating AKS/Kubernetes memory pressure, OOMKilled pods, or crashlooping deployments
+category: compute
+applies_to:
+  - memory
+  - oomkilled
+  - crashloop
+  - aks
+  - kubernetes
+files:
+  - SKILL.md
+  - oomkill-runbook.md
+tools:
+  - name: restart_aks_deployment
+    type: shell
+    description: Rolling restart of an AKS deployment to recycle unhealthy pods
+    command: "kubectl rollout restart deployment/{deployment} -n {namespace}"
+    parameters: [namespace, deployment]
+    risk: medium
+  - name: get_pod_memory
+    type: shell
+    description: Read-only snapshot of pod memory usage in the namespace
+    command: "kubectl top pods -n {namespace} --sort-by=memory"
+    parameters: [namespace]
+    risk: low
+---
 # AKS memory pressure troubleshooting
 
 Follow this procedure when a service on AKS shows memory growth, OOMKilled

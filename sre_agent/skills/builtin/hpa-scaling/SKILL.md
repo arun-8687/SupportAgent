@@ -1,3 +1,29 @@
+---
+name: hpa-scaling
+description: Use when a Kubernetes service is saturated and its Horizontal Pod Autoscaler needs headroom (scaling, maxReplicas)
+category: scaling
+applies_to:
+  - memory
+  - scaling
+  - hpa
+  - saturation
+  - kubernetes
+tools:
+  - name: adjust_hpa_max_replicas
+    type: shell
+    description: Raise the HPA max replica count so the service can scale out under pressure
+    command: "kubectl patch hpa {hpa_name} -n {namespace} --patch '{{\"spec\":{{\"maxReplicas\":{max_replicas}}}}}'"
+    parameters: [namespace, hpa_name, max_replicas]
+    risk: medium
+    supports_rollback: true
+    rollback_command: "kubectl patch hpa {hpa_name} -n {namespace} --patch '{{\"spec\":{{\"maxReplicas\":{previous_max_replicas}}}}}'"
+  - name: get_hpa_status
+    type: shell
+    description: Read-only HPA status (current/desired replicas, utilization)
+    command: "kubectl get hpa {hpa_name} -n {namespace} -o wide"
+    parameters: [namespace, hpa_name]
+    risk: low
+---
 # HPA scaling headroom
 
 Use when a workload is pinned at its HPA `maxReplicas` while resource
