@@ -49,12 +49,18 @@ class SREAgentSettings(BaseSettings):
 
     # --- Extension primitive config files ---
     skills_dir: Path = PACKAGE_ROOT / "skills" / "builtin"
+    custom_agents_dir: Path = PACKAGE_ROOT / "subagents" / "custom"
     hooks_file: Path = PACKAGE_ROOT / "hooks" / "hooks.yaml"
     gate_policy_file: Path = PACKAGE_ROOT / "gate" / "policies.yaml"
     mcp_servers_file: Path = PACKAGE_ROOT / "mcp" / "servers.yaml"
+    # Incident response plan: operator instructions for how the agent
+    # should handle incidents in this environment (markdown, optional).
+    response_plan_file: Path = PACKAGE_ROOT / "response_plan.md"
 
-    # --- Knowledge store ---
+    # --- Memory & knowledge ---
     knowledge_path: Path = Path("data/sre_agent_knowledge.jsonl")
+    memories_dir: Path = Path("data/memories")
+    knowledge_base_dir: Path = Path("data/knowledge_base")
 
     # --- Ticketing ---
     ticket_platform: str = "console"  # console | servicenow | pagerduty

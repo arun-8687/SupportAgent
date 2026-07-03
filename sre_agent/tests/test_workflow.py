@@ -15,7 +15,9 @@ async def test_prod_incident_pauses_for_approval(service, azure_monitor_alert):
 
 
 @pytest.mark.unit
-async def test_approval_resumes_to_resolution(service, azure_monitor_alert, knowledge_store):
+async def test_approval_resumes_to_resolution(
+    service, azure_monitor_alert, knowledge_store, agent_memory
+):
     """Approving the plan executes (dry-run), verifies, resolves, and captures knowledge."""
     paused = await service.handle_alert(azure_monitor_alert)
     incident_id = paused["incident_id"]
@@ -33,6 +35,18 @@ async def test_approval_resumes_to_resolution(service, azure_monitor_alert, know
     assert len(records) == 1
     assert records[0].outcome == "resolved"
     assert records[0].incident_id == incident_id
+
+    # Session insight captured with markdown knowledge files updated.
+    insights = agent_memory.load_insights()
+    assert len(insights) == 1
+    assert insights[0].incident_id == incident_id
+    assert insights[0].root_cause
+    topic = agent_memory.synthesized.read_topic("debugging payment-service")
+    assert insights[0].root_cause[:40] in topic
+    # overview.md exists and links the topic file.
+    assert "debugging-payment-service.md" in (
+        agent_memory.synthesized.directory / "overview.md"
+    ).read_text()
 
 
 @pytest.mark.unit

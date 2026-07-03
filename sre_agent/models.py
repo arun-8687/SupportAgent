@@ -64,7 +64,14 @@ class GateOutcome(str, Enum):
 
 
 class HookEvent(str, Enum):
-    """Lifecycle points where agent hooks fire."""
+    """Events where agent hooks fire.
+
+    Stop and PostToolUse are the two core hook events; the lifecycle
+    events extend them so operators can also automate around workflow
+    milestones (before investigation / after resolution).
+    """
+    STOP = "Stop"                 # agent about to finalize its response
+    POST_TOOL_USE = "PostToolUse" # a tool/skill finished executing
     INVESTIGATION_STARTED = "investigation_started"
     BEFORE_MITIGATION = "before_mitigation"
     AFTER_RESOLUTION = "after_resolution"
@@ -132,6 +139,9 @@ class TriageAssessment(BaseModel):
     duplicate_of: Optional[str] = None
     requires_investigation: bool = True
     knowledge_matches: List[KnowledgeMatch] = Field(default_factory=list)
+    # Unified memory search hits (past incidents, user memories, knowledge
+    # base, synthesized files) with citations.
+    memory_matches: List["MemorySearchResult"] = Field(default_factory=list)
 
 
 class InvestigationPlan(BaseModel):
@@ -185,11 +195,12 @@ class RootCauseAnalysis(BaseModel):
 # =============================================================================
 
 class MitigationAction(BaseModel):
-    """One proposed mitigation, usually backed by a skill."""
+    """One proposed mitigation, usually backed by a skill tool."""
     action_id: str
     name: str
     kind: Literal["skill", "python_tool", "manual"] = "skill"
     skill_name: Optional[str] = None
+    tool_name: Optional[str] = None  # tool within the skill; first tool if unset
     parameters: Dict[str, Any] = Field(default_factory=dict)
     description: str = ""
     risk: RiskLevel = RiskLevel.MEDIUM
@@ -263,6 +274,41 @@ class HookResult(BaseModel):
     success: bool
     output: str = ""
     decision: Optional[Dict[str, Any]] = None  # prompt hooks return structured JSON
+
+
+class SessionInsight(BaseModel):
+    """Structured learnings extracted after a thread completes.
+
+    Mirrors the session-insight capture: symptoms observed, resolution
+    steps that worked, root cause, and pitfalls to avoid — all of which
+    become searchable memory.
+    """
+    insight_id: str
+    incident_id: str
+    service_name: str
+    symptoms_observed: List[str] = Field(default_factory=list)
+    resolution_steps: List[str] = Field(default_factory=list)
+    root_cause: str = ""
+    pitfalls_to_avoid: List[str] = Field(default_factory=list)
+    outcome: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class UserMemory(BaseModel):
+    """A discrete fact saved via #remember."""
+    memory_id: str
+    fact: str
+    saved_by: str = "user"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MemorySearchResult(BaseModel):
+    """One hit from unified memory search, with its citation."""
+    source: Literal["past_incident", "user_memory", "knowledge_base", "synthesized"]
+    citation: str  # record id / file name the answer is grounded in
+    title: str
+    content: str
+    similarity: float = Field(ge=0.0, le=1.0, default=0.0)
 
 
 class KnowledgeRecord(BaseModel):

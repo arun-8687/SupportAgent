@@ -69,16 +69,22 @@ decision arrives — from HTTP or from an `approval` message on the same topic.
 
 ## Mapping to Azure SRE Agent concepts
 
-| Azure SRE Agent primitive | Here | Where |
+| Azure SRE Agent concept | Here | Where |
 | --- | --- | --- |
 | Incident trigger (PagerDuty/ServiceNow/Azure Monitor) | Service Bus **topic** subscription; payloads normalized per source | `triggers/`, `integrations/normalizers.py` |
-| Skills (marketplace runbooks / CLI scripts) | YAML-declared skills, registry + dry-run/live executor | `skills/` |
-| Subagents (architecture, logs & metrics, source code, RCA, scanning) | Five built-ins + registry for custom subagents | `subagents/` |
+| **Skills** (`SKILL.md` + manifest + attached tools) | Skill directories: `manifest.yaml` (name/description/files/tools) + `SKILL.md` procedural guidance + supporting `.md` files; loaded by relevance, max 5 active with LRU auto-unload; tools execute via dry-run/live executor | `skills/` |
+| **Built-in subagents** (architecture, logs & metrics, source code, RCA, scanning) | Five built-in Python subagents + registry | `subagents/` |
+| **Custom agents** (YAML: `system_prompt`, `handoff_description`, `allowed_skills`, `tools`, `enable_skills`) | YAML files in `subagents/custom/`; auto-registered; `allowed_skills` activates SKILL.md guidance | `subagents/custom_loader.py` |
 | Python tools | Observability, deployment-correlation, ticketing clients | `tools/` |
 | MCP servers | YAML server config + adapter loader | `mcp/` |
-| Agent hooks (command + prompt executors) | Lifecycle hook engine; prompt hooks can veto mitigation | `hooks/` |
+| **Agent hooks** (`Stop`, `PostToolUse` + prompt/command executors, `matcher`, `failMode`, `$ARGUMENTS`, stdin JSON context, exit-code-2 blocks) | Full hook contract incl. `{"ok"}`/`{"decision"}` responses and `additionalContext` injection; plus lifecycle events (investigation_started, before_mitigation, after_resolution, on_escalation) | `hooks/` |
 | Permission gate | Policy rules (glob/risk/environment → allow/deny/require_approval) | `gate/` |
-| Knowledge that never leaves | Append-only knowledge store, searched at triage | `memory/` |
+| **Synthesized knowledge** (`memories/synthesizedKnowledge/` markdown: always-loaded `overview.md` + topic files) | Same layout: `overview.md` (~2,000-char budget, linked topic index) + semantic topic `.md` files merged on update | `memory/synthesized.py` |
+| **Session insights** (symptoms / resolution steps / root cause / pitfalls) | Generated after every resolve/escalate; persisted + merged into topic files | `memory/unified.py` |
+| **User memories** (`#remember` / `#retrieve` / `#forget`) | `UserMemoryStore.remember/retrieve/forget` | `memory/user_memories.py` |
+| **Knowledge base** (uploaded `.md`/`.txt` runbooks & docs) | Drop files in the knowledge-base dir (or `add_document`); searched with citations | `memory/knowledge_base.py` |
+| **Unified memory search** (past incidents + memories + docs, cited) | One query across all sources, same-resource past incidents prioritized | `memory/unified.py` |
+| Incident response plan | `response_plan.md` injected into planner/mitigation prompts | `response_plan.md` |
 | Ticket with investigation summary | ServiceNow / PagerDuty / console ticketing | `tools/ticketing.py` |
 
 ## Event contract (Service Bus topic)
@@ -132,13 +138,24 @@ Environment variables (prefix `SRE_AGENT_`, see `config.py`):
 
 ## Extending the agent
 
-- **Add a skill**: drop a YAML file in `skills/builtin/` (name, command
-  template, params, risk, `applies_to` hints). No code required.
-- **Add a subagent**: subclass `subagents.base.Subagent` (implement
-  `collect()`, optionally `heuristic_finding()`), then
-  `SubagentRegistry().register(MySubagent())`.
-- **Add a hook**: declare it in `hooks/hooks.yaml` (`command` or `prompt`
-  executor) at one of the lifecycle events.
+- **Add a skill**: create a directory under `skills/builtin/` with a
+  `manifest.yaml` (name, description, `files`, `tools`) and a `SKILL.md`
+  containing the procedural guidance. Attach tools (azure_cli / shell /
+  kusto / link) in the manifest — the agent loads the skill by relevance
+  and can execute its tools. No code required.
+- **Add a custom agent**: drop a YAML file in `subagents/custom/` with
+  `name`, `system_prompt`, `handoff_description`, optional
+  `allowed_skills` (auto-enables skills) and `tools`. It registers
+  automatically and the planner can delegate to it. Python subclasses of
+  `Subagent` are also supported for tool-heavy specialists.
+- **Add a hook**: declare it in `hooks/hooks.yaml` — `Stop` validates the
+  final response, `PostToolUse` (with a `matcher` regex) audits/blocks
+  tool executions, and lifecycle events automate workflow milestones.
+- **Teach it your environment**: upload runbooks/docs (`.md`/`.txt`) to the
+  knowledge-base directory; save facts with `UserMemoryStore.remember()`;
+  edit `response_plan.md` with your incident-handling instructions. The
+  agent also writes its own `memories/synthesizedKnowledge/*.md` files as
+  it resolves incidents.
 - **Tighten/loosen the gate**: edit `gate/policies.yaml`. Deny rules always
   win; unmatched actions fall through to the default (`require_approval`).
 - **Connect an MCP server**: enable an entry in `mcp/servers.yaml` and

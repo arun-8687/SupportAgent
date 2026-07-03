@@ -37,7 +37,9 @@ class GateRule(BaseModel):
 
     def matches(self, action: MitigationAction, environment: str) -> bool:
         if self.action is not None:
-            target = action.skill_name or action.name
+            # The gate evaluates proposed tool calls: match the tool being
+            # invoked (falling back to the action name for manual steps).
+            target = action.tool_name or action.name
             if not fnmatch.fnmatch(target, self.action):
                 return False
         if self.risk is not None and action.risk not in self.risk:

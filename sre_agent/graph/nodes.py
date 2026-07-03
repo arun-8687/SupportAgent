@@ -11,11 +11,13 @@ from typing import Any, Dict, List
 
 from langgraph.types import interrupt
 
+from sre_agent.config import get_settings
 from sre_agent.gate.permission_gate import PermissionGate
 from sre_agent.graph.state import SREState
 from sre_agent.hooks.engine import HookEngine
 from sre_agent.llm import generate_structured
 from sre_agent.memory.knowledge_store import KnowledgeStore
+from sre_agent.memory.unified import AgentMemory
 from sre_agent.models import (
     ActionResult,
     ApprovalRecord,
@@ -29,6 +31,7 @@ from sre_agent.models import (
     MitigationAction,
     MitigationPlan,
     RiskLevel,
+    SessionInsight,
     Severity,
     SubagentFinding,
     TriageAssessment,
@@ -69,18 +72,27 @@ class SREAgentNodes:
         gate: PermissionGate | None = None,
         hooks: HookEngine | None = None,
         knowledge: KnowledgeStore | None = None,
+        memory: AgentMemory | None = None,
         tickets: TicketClient | None = None,
         executor: SkillExecutor | None = None,
         observability: ObservabilityClient | None = None,
     ) -> None:
-        self.subagents = subagents or SubagentRegistry()
         self.skills = skills or SkillRegistry()
+        self.subagents = subagents or SubagentRegistry(skills=self.skills)
         self.gate = gate or PermissionGate()
         self.hooks = hooks or HookEngine()
         self.knowledge = knowledge or KnowledgeStore()
+        # Unified memory: past incidents + user memories + knowledge base +
+        # synthesized markdown files, all searched together.
+        self.memory = memory or AgentMemory(incidents=self.knowledge)
         self.tickets = tickets or TicketClient()
-        self.executor = executor or SkillExecutor(registry=self.skills)
+        self.executor = executor or SkillExecutor(registry=self.skills, hooks=self.hooks)
         self.observability = observability or ObservabilityClient()
+        # Operator instructions for how incidents are handled here.
+        plan_file = get_settings().response_plan_file
+        self.response_plan = (
+            plan_file.read_text(encoding="utf-8") if plan_file.exists() else ""
+        )
 
     # ------------------------------------------------------------------ #
     # Intake & triage
@@ -100,7 +112,7 @@ class SREAgentNodes:
         return {"status": IncidentStatus.TRIAGING, "hook_results": hook_results}
 
     async def triage(self, state: SREState) -> Dict[str, Any]:
-        """Classify severity/category and pull relevant past knowledge."""
+        """Classify severity/category; search unified memory for context."""
         incident = state["incident"]
         alert = incident.alert
         text = f"{alert.title} {alert.description}"
@@ -111,7 +123,10 @@ class SREAgentNodes:
             if any(kw in text.lower() for kw in ("outage", "down"))
             else Severity.SEV2 if incident.environment == "prod" else Severity.SEV3
         )
-        matches = self.knowledge.search(text, service_name=incident.service_name)
+        # One query across all sources: past incidents (same-resource
+        # prioritized), user memories, knowledge base, synthesized files.
+        memory_matches = self.memory.search(text, service_name=incident.service_name)
+        knowledge_matches = self.knowledge.search(text, service_name=incident.service_name)
 
         assessment = TriageAssessment(
             severity=severity,
@@ -121,7 +136,8 @@ class SREAgentNodes:
                 f"category={category}, severity={severity.value}."
             ),
             requires_investigation="[test]" not in alert.title.lower(),
-            knowledge_matches=matches,
+            knowledge_matches=knowledge_matches,
+            memory_matches=memory_matches,
         )
         incident.severity = severity
         return {
@@ -153,13 +169,23 @@ class SREAgentNodes:
                 ),
             )
 
+        overview = self.memory.system_context()
+        memory_context = "\n".join(
+            f"- [{m.source}:{m.citation}] {m.content[:160]}"
+            for m in triage.memory_matches[:4]
+        )
         plan = await generate_structured(
             system_prompt=(
                 "You are the investigation planner of an SRE agent. Choose which "
-                "subagents to run for this incident. Available subagents:\n"
-                + self.subagents.descriptions()
+                "subagents to run for this incident. Available subagents "
+                "(handoff descriptions):\n" + self.subagents.descriptions()
+                + (f"\n\nEnvironment overview:\n{overview}" if overview else "")
+                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
             ),
-            user_prompt=f"Incident: {triage.summary}\nAlert: {incident.alert.description}",
+            user_prompt=(
+                f"Incident: {triage.summary}\nAlert: {incident.alert.description}"
+                + (f"\n\nRelevant memory:\n{memory_context}" if memory_context else "")
+            ),
             schema=InvestigationPlan,
             fallback=heuristic,
         )
@@ -192,23 +218,31 @@ class SREAgentNodes:
         triage = state["triage"]
         rca = state["root_cause"]
 
+        # Load the most relevant skills: their SKILL.md guidance steers the
+        # plan, and their attached tools become the executable actions.
+        query = f"{triage.category} {rca.hypothesis} {incident.alert.title}"
+        relevant_skills = self.skills.find_relevant(query)
+        for skill in relevant_skills:
+            self.skills.activate(skill.name)
+
         def heuristic() -> MitigationPlan:
             actions: List[MitigationAction] = []
-            hints = [triage.category, rca.hypothesis, incident.alert.title]
-            applicable = self.skills.find_applicable(
-                *(word for hint in hints for word in hint.lower().split())
-            )
-            for skill in applicable[:2]:
+            for skill in relevant_skills[:2]:
+                # The first tool in a skill manifest is its primary action.
+                tool = skill.tools[0] if skill.tools else None
+                if tool is None:
+                    continue
                 actions.append(
                     MitigationAction(
                         action_id=f"act-{uuid.uuid4().hex[:8]}",
-                        name=skill.name,
+                        name=tool.name,
                         kind="skill",
                         skill_name=skill.name,
-                        parameters=self._default_parameters(skill.parameters, incident),
-                        description=skill.description,
-                        risk=skill.risk,
-                        supports_rollback=skill.supports_rollback,
+                        tool_name=tool.name,
+                        parameters=self._default_parameters(tool.parameters, incident),
+                        description=tool.description or skill.description,
+                        risk=tool.risk,
+                        supports_rollback=tool.supports_rollback,
                     )
                 )
             if rca.correlated_change:
@@ -234,9 +268,14 @@ class SREAgentNodes:
         plan = await generate_structured(
             system_prompt=(
                 "You are the mitigation planner of an SRE agent. Propose the "
-                "smallest safe set of actions. Prefer these registered skills "
-                "(reference them by exact name in skill_name):\n"
+                "smallest safe set of actions. Prefer registered skill tools "
+                "(set skill_name and tool_name exactly):\n"
                 + self.skills.catalog_text()
+                + (
+                    f"\n\nActive skill guidance:\n{self.skills.active_guidance()}"
+                    if relevant_skills else ""
+                )
+                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
             ),
             user_prompt=(
                 f"Root cause: {rca.hypothesis} (confidence {rca.confidence})\n"
@@ -426,8 +465,38 @@ class SREAgentNodes:
             )
         }
 
+    def _build_session_insight(self, state: SREState, outcome: str) -> SessionInsight:
+        """Extract structured learnings from the finished thread."""
+        incident = state["incident"]
+        rca = state.get("root_cause")
+        symptoms = [
+            e.observation
+            for f in state.get("findings", [])
+            for e in f.evidence
+            if e.source in ("log_analytics", "azure_monitor", "alert_signals")
+        ][:5]
+        resolution_steps, pitfalls = [], []
+        plan = state.get("mitigation_plan")
+        execution = state.get("execution")
+        if plan and execution:
+            for action, result in zip(plan.actions, execution.results):
+                if result.success:
+                    resolution_steps.append(f"{action.name}: {action.description}")
+                else:
+                    pitfalls.append(f"{action.name} did not work: {result.error}")
+        return SessionInsight(
+            insight_id=self.memory.new_insight_id(),
+            incident_id=incident.incident_id,
+            service_name=incident.service_name,
+            symptoms_observed=symptoms,
+            resolution_steps=resolution_steps,
+            root_cause=rca.hypothesis if rca else "",
+            pitfalls_to_avoid=pitfalls,
+            outcome=outcome,
+        )
+
     async def resolve(self, state: SREState) -> Dict[str, Any]:
-        """Close the loop: update ticket, capture knowledge, fire hooks."""
+        """Close the loop: validate via Stop hooks, update ticket, learn."""
         incident = state["incident"]
         rca = state["root_cause"]
         executed = [
@@ -442,6 +511,25 @@ class SREAgentNodes:
             f"Mitigations executed: {len(executed)}."
         )
 
+        # Stop hooks validate the final response before it reaches users;
+        # a rejection makes the agent amend the summary with what's missing.
+        stop_results = await self.hooks.fire(
+            HookEvent.STOP,
+            {
+                "hook_event_name": "Stop",
+                "agent_name": "sre_agent",
+                "final_output": summary,
+                "stop_hook_active": True,
+            },
+        )
+        veto = self.hooks.blocked_by(stop_results)
+        if veto:
+            reason = (veto.decision or {}).get("reason", "")
+            summary += (
+                f" Additional detail (Stop hook '{veto.hook}'): {reason} "
+                f"Actions taken: {'; '.join(executed)}."
+            )
+
         record = self.knowledge.save(
             KnowledgeRecord(
                 record_id=self.knowledge.new_record_id(),
@@ -454,6 +542,10 @@ class SREAgentNodes:
                 outcome="resolved",
                 tags=[incident.environment, state["triage"].category],
             )
+        )
+        # Session insight -> insight log + synthesized knowledge md files.
+        self.memory.capture_session_insight(
+            self._build_session_insight(state, outcome="resolved")
         )
 
         ticket = state.get("ticket")
@@ -469,7 +561,7 @@ class SREAgentNodes:
             "resolution_summary": summary,
             "knowledge_record_id": record.record_id,
             "ticket": ticket,
-            "hook_results": hook_results,
+            "hook_results": stop_results + hook_results,
         }
 
     async def escalate(self, state: SREState) -> Dict[str, Any]:
@@ -497,6 +589,10 @@ class SREAgentNodes:
                 )
             )
             record_id = record.record_id
+            # Escalations teach the agent too: what didn't work matters.
+            self.memory.capture_session_insight(
+                self._build_session_insight(state, outcome="escalated")
+            )
 
         ticket = state.get("ticket")
         if ticket:
