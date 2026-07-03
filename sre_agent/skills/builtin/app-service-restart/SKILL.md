@@ -1,6 +1,10 @@
 ---
 name: app-service-restart
-description: Use when an Azure App Service is wedged, leaking memory, or returning 5xx after exhausting workers
+description: Restarts a wedged Azure App Service and verifies it comes back healthy. Use when an App Service leaks memory, hangs, or returns 5xx bursts after exhausting workers.
+compatibility: Requires the Azure CLI (az) with rights on the target App Service
+metadata:
+  author: sre-agent
+  version: "1.0"
 category: compute
 applies_to:
   - memory

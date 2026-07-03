@@ -1,6 +1,10 @@
 ---
 name: aks-memory-pressure
-description: Use when investigating AKS/Kubernetes memory pressure, OOMKilled pods, or crashlooping deployments
+description: Investigates AKS/Kubernetes memory pressure, OOMKilled pods, and crashlooping deployments, and mitigates via rolling restarts. Use when pods restart with OOMKilled, memory metrics trend upward, or a deployment crashloops.
+compatibility: Requires kubectl with access to the affected cluster
+metadata:
+  author: sre-agent
+  version: "1.0"
 category: compute
 applies_to:
   - memory
@@ -10,7 +14,7 @@ applies_to:
   - kubernetes
 files:
   - SKILL.md
-  - oomkill-runbook.md
+  - references/oomkill-runbook.md
 tools:
   - name: restart_aks_deployment
     type: shell

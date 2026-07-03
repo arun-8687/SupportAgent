@@ -62,10 +62,27 @@ class SkillTool(BaseModel):
     rollback_command: Optional[str] = None
 
 
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+MAX_NAME_LEN = 64
+MAX_DESCRIPTION_LEN = 1024
+
+
 class SkillDefinition(BaseModel):
-    """A skill loaded from a manifest.yaml + SKILL.md directory."""
+    """A skill loaded from a SKILL.md directory.
+
+    Frontmatter follows the Agent Skills spec (agentskills.io): required
+    name/description, optional license/compatibility/metadata. The
+    `tools`, `applies_to`, `category`, and `files` fields are documented
+    extensions of this implementation — they carry the executable-tool
+    and gate/risk metadata the spec's scripts/ model has no place for.
+    """
     name: str
     description: str
+    # --- Agent Skills spec optional fields ---
+    license: Optional[str] = None
+    compatibility: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+    # --- implementation extensions ---
     category: str = "general"
     files: List[str] = Field(default_factory=lambda: ["SKILL.md"])
     tools: List[SkillTool] = Field(default_factory=list)
@@ -83,7 +100,12 @@ class SkillDefinition(BaseModel):
         return body
 
     def read_supporting_files(self) -> Dict[str, str]:
-        """Runbooks / reference material shipped alongside SKILL.md."""
+        """Runbooks / reference material shipped alongside SKILL.md.
+
+        Reads the files listed in frontmatter plus anything in the
+        spec-recommended references/ directory (loaded on demand — the
+        progressive-disclosure resource tier).
+        """
         if self.path is None:
             return {}
         contents = {}
@@ -93,6 +115,11 @@ class SkillDefinition(BaseModel):
             file_path = self.path / name
             if file_path.exists():
                 contents[name] = file_path.read_text(encoding="utf-8")
+        references = self.path / "references"
+        if references.is_dir():
+            for file_path in sorted(references.glob("*.md")):
+                key = f"references/{file_path.name}"
+                contents.setdefault(key, file_path.read_text(encoding="utf-8"))
         return contents
 
     def get_tool(self, tool_name: Optional[str]) -> Optional[SkillTool]:
@@ -123,10 +150,32 @@ class SkillRegistry:
                 if data is None:
                     continue
                 skill = SkillDefinition.model_validate({**data, "path": skill_dir})
+                self._validate_spec_rules(skill, skill_dir)
                 self._skills[skill.name] = skill
             except Exception:
                 logger.exception("Failed to load skill from %s", skill_dir)
         logger.info("Loaded %d skills", len(self._skills))
+
+    @staticmethod
+    def _validate_spec_rules(skill: "SkillDefinition", skill_dir: Path) -> None:
+        """Enforce Agent Skills spec naming rules (warn, don't reject —
+        an operator's misnamed skill should still work during an incident)."""
+        if not SKILL_NAME_RE.match(skill.name) or len(skill.name) > MAX_NAME_LEN:
+            logger.warning(
+                "Skill name %r violates the Agent Skills spec "
+                "(lowercase alphanumerics + single hyphens, max %d chars)",
+                skill.name, MAX_NAME_LEN,
+            )
+        if skill.name != skill_dir.name:
+            logger.warning(
+                "Skill name %r must match its directory name %r per the "
+                "Agent Skills spec", skill.name, skill_dir.name,
+            )
+        if not skill.description or len(skill.description) > MAX_DESCRIPTION_LEN:
+            logger.warning(
+                "Skill %r description must be 1-%d characters per the "
+                "Agent Skills spec", skill.name, MAX_DESCRIPTION_LEN,
+            )
 
     @staticmethod
     def _read_metadata(skill_dir: Path) -> Optional[dict]:

@@ -1,6 +1,10 @@
 ---
 name: hpa-scaling
-description: Use when a Kubernetes service is saturated and its Horizontal Pod Autoscaler needs headroom (scaling, maxReplicas)
+description: Raises Horizontal Pod Autoscaler headroom for saturated Kubernetes services. Use when a workload is pinned at maxReplicas while CPU or memory pressure keeps climbing.
+compatibility: Requires kubectl with access to the affected cluster
+metadata:
+  author: sre-agent
+  version: "1.0"
 category: scaling
 applies_to:
   - memory

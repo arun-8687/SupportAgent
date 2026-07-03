@@ -24,12 +24,12 @@ def test_builtin_skills_load_with_skill_md():
 
 
 @pytest.mark.unit
-def test_skill_supporting_files_load():
+def test_skill_supporting_files_load_from_references_dir():
     registry = SkillRegistry()
     skill = registry.get("aks-memory-pressure")
     supporting = skill.read_supporting_files()
-    assert "oomkill-runbook.md" in supporting
-    assert "OOMKilled" in supporting["oomkill-runbook.md"]
+    assert "references/oomkill-runbook.md" in supporting
+    assert "OOMKilled" in supporting["references/oomkill-runbook.md"]
 
 
 @pytest.mark.unit

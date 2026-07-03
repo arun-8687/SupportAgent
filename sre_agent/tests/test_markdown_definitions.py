@@ -94,6 +94,54 @@ def test_legacy_manifest_yaml_still_loads(tmp_path):
 
 
 @pytest.mark.unit
+def test_builtin_skills_conform_to_agent_skills_spec():
+    """agentskills.io rules: naming, dir match, description, spec fields."""
+    from sre_agent.skills.registry import MAX_DESCRIPTION_LEN, SKILL_NAME_RE
+
+    registry = SkillRegistry()
+    assert registry.all(), "no builtin skills loaded"
+    for skill in registry.all():
+        assert SKILL_NAME_RE.match(skill.name), skill.name
+        assert len(skill.name) <= 64
+        assert skill.name == skill.path.name  # name must match directory
+        assert 1 <= len(skill.description) <= MAX_DESCRIPTION_LEN
+        # Spec optional fields are accepted and preserved.
+        assert skill.compatibility  # our builtins document requirements
+        assert skill.metadata.get("version")
+
+
+@pytest.mark.unit
+def test_spec_violations_load_with_warning(tmp_path, caplog):
+    """Bad names warn (spec enforcement) but don't break an incident."""
+    import logging
+
+    skill_dir = tmp_path / "Bad--Name"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: Bad--Name\ndescription: mismatched and invalid\n---\n# x\n"
+    )
+    with caplog.at_level(logging.WARNING):
+        registry = SkillRegistry(skills_dir=tmp_path)
+    assert registry.get("Bad--Name") is not None  # still usable
+    assert any("Agent Skills spec" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_references_dir_auto_discovered(tmp_path):
+    skill_dir = tmp_path / "with-refs"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: with-refs\ndescription: has a references directory\n---\n# g\n"
+    )
+    refs = skill_dir / "references"
+    refs.mkdir()
+    (refs / "deep-dive.md").write_text("# Deep dive\ndetails")
+    registry = SkillRegistry(skills_dir=tmp_path)
+    supporting = registry.get("with-refs").read_supporting_files()
+    assert "references/deep-dive.md" in supporting  # not listed in `files`
+
+
+@pytest.mark.unit
 def test_skill_md_without_frontmatter_or_manifest_is_skipped(tmp_path):
     skill_dir = tmp_path / "bare"
     skill_dir.mkdir()

@@ -315,6 +315,19 @@ tools:
 
 (A legacy layout with a separate `manifest.yaml` is still accepted.)
 
+**Agent Skills spec alignment** ([agentskills.io/specification](https://agentskills.io/specification)):
+`name` (lowercase-hyphen, ≤64 chars, must match the directory — validated
+with warnings at load), `description` (1–1024 chars, "what + when"), the
+optional `license`/`compatibility`/`metadata` fields, the `references/`
+directory (auto-discovered, loaded on demand), and the progressive-disclosure
+model (name+description at startup → body on activation → references as
+needed) all follow the spec. The `tools`, `applies_to`, `category`, and
+`files` fields are **documented extensions**: they carry the parameterized
+commands, risk levels, and rollback metadata that the permission gate and
+dry-run/dispatch executor require — the spec's unstructured `scripts/`
+model has no place for that safety metadata. Spec-compliant consumers
+ignore unknown frontmatter, so the files remain interoperable.
+
 Behavior mirrored from the Azure model: the agent selects skills by
 **relevance** (description/`applies_to` vs. the incident — no explicit
 command), activating a skill loads its `SKILL.md` into reasoning prompts, at
