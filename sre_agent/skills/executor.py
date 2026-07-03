@@ -56,7 +56,9 @@ class SkillExecutor:
         self.dry_run = settings.dry_run if dry_run is None else dry_run
         self.hooks = hooks
 
-    async def execute(self, action: MitigationAction) -> ActionResult:
+    async def execute(
+        self, action: MitigationAction, incident_id: Optional[str] = None
+    ) -> ActionResult:
         started = time.monotonic()
 
         if action.kind == "manual":
@@ -102,12 +104,16 @@ class SkillExecutor:
         with span(
             f"sre_agent.skill_tool.{tool.name}",
             skill=skill.name, tool=tool.name, dry_run=self.dry_run,
+            incident_id=incident_id,
         ):
             result = await self._run(action, tool, command, started)
-            result = await self._post_tool_use(action, tool, command, result)
+            result = await self._post_tool_use(
+                action, tool, command, result, incident_id
+            )
         log_step(
             "skill_tool_execution",
             "succeeded" if result.success else "failed",
+            incident_id=incident_id,
             duration_ms=result.duration_ms,
             skill=skill.name, tool=tool.name, action_id=action.action_id,
             dry_run=result.dry_run, risk=action.risk.value,
@@ -235,7 +241,12 @@ class SkillExecutor:
             )
 
     async def _post_tool_use(
-        self, action: MitigationAction, tool: SkillTool, command: str, result: ActionResult
+        self,
+        action: MitigationAction,
+        tool: SkillTool,
+        command: str,
+        result: ActionResult,
+        incident_id: Optional[str] = None,
     ) -> ActionResult:
         """Fire PostToolUse hooks; a block decision overrides the result."""
         if self.hooks is None:
@@ -244,6 +255,7 @@ class SkillExecutor:
             HookEvent.POST_TOOL_USE,
             {
                 "hook_event_name": "PostToolUse",
+                "incident_id": incident_id or "",
                 "tool_name": tool.name,
                 "tool_input": {"command": command, **action.parameters},
                 "tool_result": (result.output or result.error or "")[:2000],

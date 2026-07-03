@@ -427,6 +427,7 @@ class SREAgentNodes:
 
     async def execute_mitigation(self, state: SREState) -> Dict[str, Any]:
         """Run approved (non-denied) actions through the skill executor."""
+        incident_id = state["incident"].incident_id
         denied = {
             d.action_id
             for d in state.get("gate_decisions", [])
@@ -444,7 +445,9 @@ class SREAgentNodes:
                     )
                 )
                 continue
-            results.append(await self.executor.execute(action))
+            results.append(
+                await self.executor.execute(action, incident_id=incident_id)
+            )
 
         executed = [r for r in results if r.error != "Denied by permission gate"]
         success = bool(executed) and all(r.success for r in executed)

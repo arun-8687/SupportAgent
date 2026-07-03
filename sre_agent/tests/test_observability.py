@@ -108,3 +108,13 @@ async def test_duplicate_and_tool_steps_are_logged(
     ]
     assert ("alert_intake", "duplicate") in statuses
     assert ("skill_tool_execution", "succeeded") in statuses
+
+    # Tool executions are correlated to the incident like every other step.
+    tool_records = [
+        r for r in caplog.records
+        if getattr(r, "step", "") == "skill_tool_execution"
+    ]
+    assert tool_records
+    assert all(
+        r.incident_id == paused["incident_id"] for r in tool_records
+    )
