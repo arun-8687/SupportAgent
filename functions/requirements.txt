@@ -1,3 +1,0 @@
-# Azure Functions requirements
-azure-functions>=1.18.0
-httpx>=0.26.0
