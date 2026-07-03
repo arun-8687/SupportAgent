@@ -80,18 +80,34 @@ def _get_semaphore() -> asyncio.Semaphore:
 
 async def _invoke_with_retry(coro_factory):
     """Bounded-concurrency invoke with exponential backoff on failure."""
+    import time
+
+    from sre_agent.observability import log_step, span
+
     settings = get_settings()
     last_exc: Optional[Exception] = None
     for attempt in range(settings.llm_retry_attempts):
+        started = time.monotonic()
         try:
             async with _get_semaphore():
-                return await coro_factory()
+                with span("sre_agent.llm_call", attempt=attempt + 1):
+                    result = await coro_factory()
+            log_step(
+                "llm_call", "succeeded",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                attempt=attempt + 1,
+                level=logging.DEBUG,
+            )
+            return result
         except Exception as exc:  # includes 429 rate limits
             last_exc = exc
             delay = settings.llm_retry_base_delay_seconds * (2 ** attempt)
-            logger.warning(
-                "LLM call failed (attempt %d/%d): %s; retrying in %.1fs",
-                attempt + 1, settings.llm_retry_attempts, exc, delay,
+            log_step(
+                "llm_call", "retrying",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                attempt=attempt + 1, max_attempts=settings.llm_retry_attempts,
+                error=str(exc)[:200], retry_delay_s=delay,
+                level=logging.WARNING,
             )
             await asyncio.sleep(delay)
     raise last_exc  # type: ignore[misc]

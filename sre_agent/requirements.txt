@@ -23,6 +23,8 @@ httpx>=0.26.0
 # langgraph-checkpoint-postgres>=2.0.0  # durable checkpointer (brings psycopg,
 #                                       # also used by the alert ledger and
 #                                       # pending-approval stores)
+# azure-monitor-opentelemetry>=1.6.0    # export step logs/spans to App Insights
+#                                       # (enabled by APPLICATIONINSIGHTS_CONNECTION_STRING)
 
 # Optional extras
 # langchain-mcp-adapters>=0.1.0   # enable MCP connectors (sre_agent/mcp)

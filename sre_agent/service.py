@@ -27,6 +27,7 @@ from sre_agent.graph.nodes import SREAgentNodes
 from sre_agent.graph.state import create_initial_state
 from sre_agent.graph.workflow import build_workflow
 from sre_agent.integrations.normalizers import normalize, to_incident
+from sre_agent.observability import configure_telemetry, log_step
 from sre_agent.stores import create_alert_ledger, create_pending_approval_store
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class SREAgentService:
         alert_ledger=None,
         pending_approvals=None,
     ) -> None:
+        configure_telemetry()  # idempotent; every trigger surface passes here
         self.graph = build_workflow(nodes=nodes, checkpointer=checkpointer)
         self.alert_ledger = alert_ledger or create_alert_ledger()
         self.pending_approvals = pending_approvals or create_pending_approval_store()
@@ -60,9 +62,9 @@ class SREAgentService:
         storm_key = f"{incident.service_name}:{alert.title[:80].lower()}"
         claim = self.alert_ledger.claim(alert.alert_id, incident.incident_id, storm_key)
         if claim.status == "duplicate":
-            logger.info(
-                "Alert %s already claimed by incident %s; skipping",
-                alert.alert_id, claim.incident_id,
+            log_step(
+                "alert_intake", "duplicate", claim.incident_id,
+                alert_id=alert.alert_id, service_name=incident.service_name,
             )
             return {
                 "incident_id": claim.incident_id,
@@ -70,9 +72,10 @@ class SREAgentService:
                 "note": "Alert already processed; no new investigation started.",
             }
         if claim.status == "storm":
-            logger.warning(
-                "Alert storm on %s; suppressing (parent incident %s)",
-                storm_key, claim.incident_id,
+            log_step(
+                "alert_intake", "storm_suppressed", claim.incident_id,
+                alert_id=alert.alert_id, storm_key=storm_key,
+                level=logging.WARNING,
             )
             return {
                 "incident_id": claim.incident_id,
@@ -83,9 +86,10 @@ class SREAgentService:
                 ),
             }
 
-        logger.info(
-            "Handling alert %s -> incident %s (%s)",
-            alert.alert_id, incident.incident_id, incident.service_name,
+        log_step(
+            "alert_intake", "accepted", incident.incident_id,
+            alert_id=alert.alert_id, service_name=incident.service_name,
+            source=alert.source.value, environment=incident.environment,
         )
         config = {"configurable": {"thread_id": incident.incident_id}}
         state = await self.graph.ainvoke(create_initial_state(incident), config)
@@ -96,9 +100,9 @@ class SREAgentService:
             # Register for the timeout sweeper so a paused investigation
             # can't hang forever waiting for a human.
             self.pending_approvals.add(incident.incident_id)
-            logger.info(
-                "Incident %s awaiting approval (%d proposed actions)",
-                incident.incident_id, len(request.get("actions", [])),
+            log_step(
+                "approval_request", "pending", incident.incident_id,
+                actions=len(request.get("actions", [])),
             )
             return {
                 "incident_id": incident.incident_id,
@@ -145,6 +149,11 @@ class SREAgentService:
                 "note": "No investigation is awaiting approval under this id.",
             }
 
+        log_step(
+            "approval_decision", "approved" if approved else "rejected",
+            incident_id, approver=approver, channel=channel,
+            verified=approver_verified,
+        )
         state = await self.graph.ainvoke(
             Command(
                 resume={
@@ -171,7 +180,11 @@ class SREAgentService:
         for incident_id in self.pending_approvals.expired(
             settings.approval_timeout_seconds
         ):
-            logger.warning("Approval timed out for incident %s; escalating", incident_id)
+            log_step(
+                "approval_timeout", "escalating", incident_id,
+                timeout_seconds=settings.approval_timeout_seconds,
+                level=logging.WARNING,
+            )
             result = await self.submit_approval(
                 incident_id=incident_id,
                 approved=False,

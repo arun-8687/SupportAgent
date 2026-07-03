@@ -23,8 +23,11 @@ import logging
 import azure.functions as func
 
 from sre_agent.config import get_settings
+from sre_agent.observability import configure_telemetry
 from sre_agent.security import parse_client_principal
 from sre_agent.service import SREAgentService
+
+configure_telemetry()  # export step logs/spans to App Insights from startup
 
 app = func.FunctionApp()
 

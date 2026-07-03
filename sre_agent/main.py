@@ -45,6 +45,9 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
     )
+    from sre_agent.observability import configure_telemetry
+
+    configure_telemetry()
     parser = argparse.ArgumentParser(prog="sre_agent")
     sub = parser.add_subparsers(dest="command", required=True)
 

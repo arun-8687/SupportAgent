@@ -19,6 +19,7 @@ from typing import Optional
 
 from sre_agent.config import get_settings
 from sre_agent.models import ActionResult, HookEvent, MitigationAction
+from sre_agent.observability import log_step, span
 from sre_agent.skills.registry import SkillRegistry, SkillTool
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,21 @@ class SkillExecutor:
                 dry_run=self.dry_run,
             )
 
-        result = await self._run(action, tool, command, started)
-        return await self._post_tool_use(action, tool, command, result)
+        with span(
+            f"sre_agent.skill_tool.{tool.name}",
+            skill=skill.name, tool=tool.name, dry_run=self.dry_run,
+        ):
+            result = await self._run(action, tool, command, started)
+            result = await self._post_tool_use(action, tool, command, result)
+        log_step(
+            "skill_tool_execution",
+            "succeeded" if result.success else "failed",
+            duration_ms=result.duration_ms,
+            skill=skill.name, tool=tool.name, action_id=action.action_id,
+            dry_run=result.dry_run, risk=action.risk.value,
+            error=(result.error or None),
+        )
+        return result
 
     # ------------------------------------------------------------------ #
 

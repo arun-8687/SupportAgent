@@ -464,6 +464,36 @@ A timer trigger (`ApprovalSweep`, every 5 minutes) escalates approvals past
 
 ---
 
+## Observability
+
+Every workflow node, tool execution, LLM call, and intake/approval event
+emits a **structured step record** (step, status, `incident_id`,
+`duration_ms`, service, outcome). With `APPLICATIONINSIGHTS_CONNECTION_STRING`
+set and `azure-monitor-opentelemetry` installed, `configure_telemetry()`
+(called automatically by every trigger surface) exports:
+
+- step logs → App Insights **traces** with the fields as `customDimensions`,
+- OpenTelemetry spans (per node, per skill tool, per LLM call) →
+  **dependencies**, giving a timing waterfall per incident.
+
+Reconstruct any incident's timeline with one KQL query:
+
+```kusto
+traces
+| where customDimensions.incident_id == "sre-3f0f3c7841"
+| project timestamp, step = customDimensions.step,
+          status = customDimensions.status,
+          duration_ms = customDimensions.duration_ms
+| order by timestamp asc
+```
+
+Steps logged: `alert_intake` (accepted / duplicate / storm_suppressed),
+every graph node (completed / paused / failed, with durations),
+`approval_request` / `approval_decision` / `approval_timeout`,
+`skill_tool_execution`, and `llm_call` (attempts + retries). Without App
+Insights configured everything degrades to plain local logging — offline
+dev and CI need nothing.
+
 ## Reliability & safety
 
 | Protection | Mechanism |

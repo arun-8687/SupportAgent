@@ -242,6 +242,12 @@ Notes:
 - For ServiceNow/PagerDuty ticketing set `SRE_AGENT_TICKET_PLATFORM` and
   the matching credentials (see the configuration reference in the main
   README).
+- **Telemetry**: `APPLICATIONINSIGHTS_CONNECTION_STRING` is set automatically
+  when App Insights is linked to the Function App; with the
+  `azure-monitor-opentelemetry` package installed (step 8), every workflow
+  step, tool execution, and LLM call exports as structured traces/spans
+  correlated by `incident_id`. The always-on listener (step 12) needs this
+  setting added explicitly.
 
 ## 8. Build and publish the code
 
@@ -253,8 +259,9 @@ cd /path/to/SupportAgent
 rm -rf build/functionapp && mkdir -p build/functionapp
 cp sre_agent/deploy/host.json build/functionapp/host.json
 cp sre_agent/requirements.txt build/functionapp/requirements.txt
-# production needs the Postgres checkpointer:
+# production needs the Postgres checkpointer + App Insights exporter:
 echo "langgraph-checkpoint-postgres>=2.0.0" >> build/functionapp/requirements.txt
+echo "azure-monitor-opentelemetry>=1.6.0" >> build/functionapp/requirements.txt
 cp -r sre_agent build/functionapp/sre_agent
 cat > build/functionapp/function_app.py <<'EOF'
 """Azure Functions entry point: re-export the app from the package."""
@@ -406,7 +413,7 @@ messages (or add a small HTTP front if you want the REST endpoint).
 
 | Task | How |
 | --- | --- |
-| Watch investigations | Application Insights traces; `func azure functionapp logstream $APP` |
+| Watch investigations | structured step telemetry in App Insights: `traces \| where customDimensions.incident_id == "sre-..." \| project timestamp, customDimensions.step, customDimensions.status, customDimensions.duration_ms \| order by timestamp asc`; live: `func azure functionapp logstream $APP` |
 | Inspect dead-lettered alerts | `az servicebus topic subscription show --resource-group $RG --namespace-name $SB_NAMESPACE --topic-name $TOPIC_IN --name $SB_SUB --query countDetails` then Service Bus Explorer (portal) on the DLQ |
 | Timed-out approvals | escalated automatically by the `ApprovalSweep` timer (every 5 min); look for "Sweeper escalated" traces |
 | Checkpoint growth | pruned by the same timer past `SRE_AGENT_CHECKPOINT_RETENTION_DAYS`; verify with `SELECT count(*) FROM checkpoints;` |

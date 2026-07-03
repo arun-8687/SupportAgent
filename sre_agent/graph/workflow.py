@@ -22,7 +22,8 @@ The SRE incident-response graph.
                               resolve ── END              escalate ── END
 """
 import logging
-from typing import List, Optional, Union
+import time
+from typing import Any, Callable, List, Optional, Union
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -33,8 +34,70 @@ from sre_agent.config import get_settings
 from sre_agent.graph.nodes import SREAgentNodes
 from sre_agent.graph.state import SREState
 from sre_agent.models import GateOutcome
+from sre_agent.observability import log_step, span
+
+try:  # interrupt() pauses the graph by raising GraphInterrupt — not an error
+    from langgraph.errors import GraphInterrupt
+except ImportError:  # pragma: no cover
+    GraphInterrupt = ()  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+def _traced(name: str, fn: Callable) -> Callable:
+    """Wrap a node so every execution emits a step record + span.
+
+    One wrapper instruments all nodes uniformly: started/completed/failed
+    (or paused, for the approval interrupt) with incident correlation and
+    duration — the "agents log at each step" guarantee lives here, not in
+    each node body.
+    """
+
+    async def wrapper(state: Any) -> Any:
+        incident = state.get("incident") if isinstance(state, dict) else None
+        incident_id = getattr(incident, "incident_id", None)
+        service = getattr(incident, "service_name", None)
+        started = time.monotonic()
+
+        with span(
+            f"sre_agent.node.{name}",
+            node=name,
+            incident_id=incident_id,
+            service_name=service,
+        ):
+            try:
+                result = await fn(state)
+            except GraphInterrupt:
+                # await_approval pausing for a human — expected, not a failure.
+                log_step(
+                    name, "paused", incident_id,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    service_name=service,
+                )
+                raise
+            except Exception as exc:
+                log_step(
+                    name, "failed", incident_id,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    service_name=service,
+                    error=str(exc)[:300],
+                    level=logging.ERROR,
+                )
+                raise
+
+        outcome = None
+        if isinstance(result, dict):
+            outcome = getattr(result.get("status"), "value", result.get("status"))
+        log_step(
+            name, "completed", incident_id,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            service_name=service,
+            workflow_status=outcome,
+        )
+        return result
+
+    wrapper.__name__ = name
+    return wrapper
 
 
 def _serializer() -> JsonPlusSerializer:
@@ -169,21 +232,26 @@ def build_workflow(
     nodes = nodes or SREAgentNodes()
     graph = StateGraph(SREState)
 
-    graph.add_node("intake", nodes.intake)
-    graph.add_node("triage", nodes.triage)
-    graph.add_node("suppress", nodes.suppress)
-    graph.add_node("plan_investigation", nodes.plan_investigation)
-    graph.add_node("run_subagent", nodes.run_subagent)
-    graph.add_node("analyze_root_cause", nodes.analyze_root_cause)
-    graph.add_node("propose_mitigation", nodes.propose_mitigation)
-    graph.add_node("open_ticket", nodes.open_ticket)
-    graph.add_node("permission_gate", nodes.permission_gate)
-    graph.add_node("await_approval", nodes.await_approval)
-    graph.add_node("auto_approve", nodes.auto_approve)
-    graph.add_node("execute_mitigation", nodes.execute_mitigation)
-    graph.add_node("verify", nodes.verify)
-    graph.add_node("resolve", nodes.resolve)
-    graph.add_node("escalate", nodes.escalate)
+    # Every node is wrapped so each step logs start/outcome/duration to
+    # App Insights with incident correlation (see _traced).
+    for name, fn in (
+        ("intake", nodes.intake),
+        ("triage", nodes.triage),
+        ("suppress", nodes.suppress),
+        ("plan_investigation", nodes.plan_investigation),
+        ("run_subagent", nodes.run_subagent),
+        ("analyze_root_cause", nodes.analyze_root_cause),
+        ("propose_mitigation", nodes.propose_mitigation),
+        ("open_ticket", nodes.open_ticket),
+        ("permission_gate", nodes.permission_gate),
+        ("await_approval", nodes.await_approval),
+        ("auto_approve", nodes.auto_approve),
+        ("execute_mitigation", nodes.execute_mitigation),
+        ("verify", nodes.verify),
+        ("resolve", nodes.resolve),
+        ("escalate", nodes.escalate),
+    ):
+        graph.add_node(name, _traced(name, fn))
 
     graph.set_entry_point("intake")
     graph.add_edge("intake", "triage")
