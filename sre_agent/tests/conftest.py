@@ -7,6 +7,7 @@ import pytest
 from sre_agent.gate.permission_gate import PermissionGate
 from sre_agent.graph.nodes import SREAgentNodes
 from sre_agent.hooks.engine import HookEngine
+from sre_agent.known_errors import KnownErrorStore
 from sre_agent.memory.knowledge_base import KnowledgeBase
 from sre_agent.memory.knowledge_store import KnowledgeStore
 from sre_agent.memory.synthesized import SynthesizedKnowledge
@@ -68,8 +69,17 @@ def pending_approvals(tmp_path) -> FilePendingApprovalStore:
 
 
 @pytest.fixture
+def known_errors(tmp_path) -> KnownErrorStore:
+    """Known-error store rooted in a temp dir (no repo pollution)."""
+    return KnownErrorStore(
+        global_dir=tmp_path / "known_errors",
+        apps_dir=tmp_path / "apps",
+    )
+
+
+@pytest.fixture
 def service(
-    knowledge_store, agent_memory, skills, hooks, alert_ledger, pending_approvals
+    knowledge_store, agent_memory, skills, hooks, alert_ledger, pending_approvals, known_errors
 ) -> SREAgentService:
     """Full workflow wired with dry-run executor and temp stores."""
     nodes = SREAgentNodes(
@@ -79,6 +89,7 @@ def service(
         knowledge=knowledge_store,
         memory=agent_memory,
         executor=SkillExecutor(registry=skills, dry_run=True, hooks=hooks),
+        known_errors=known_errors,
     )
     return SREAgentService(
         nodes=nodes,

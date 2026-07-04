@@ -15,13 +15,16 @@ from sre_agent.config import get_settings
 from sre_agent.gate.permission_gate import PermissionGate
 from sre_agent.graph.state import SREState
 from sre_agent.hooks.engine import HookEngine
+from sre_agent.known_errors import KnownErrorStore
 from sre_agent.llm import generate_structured
 from sre_agent.memory.knowledge_store import KnowledgeStore
 from sre_agent.memory.unified import AgentMemory
+from sre_agent.observability import log_step
 from sre_agent.models import (
     ActionResult,
     ApprovalRecord,
     ExecutionReport,
+    GateDecision,
     GateOutcome,
     HookEvent,
     Incident,
@@ -78,12 +81,14 @@ class SREAgentNodes:
         tickets: TicketClient | None = None,
         executor: SkillExecutor | None = None,
         observability: ObservabilityClient | None = None,
+        known_errors: KnownErrorStore | None = None,
     ) -> None:
         self.skills = skills or SkillRegistry()
         self.subagents = subagents or SubagentRegistry(skills=self.skills)
         self.gate = gate or PermissionGate()
         self.hooks = hooks or HookEngine()
         self.knowledge = knowledge or KnowledgeStore()
+        self.known_errors = known_errors or KnownErrorStore()
         # Unified memory: past incidents + user memories + knowledge base +
         # synthesized markdown files, all searched together.
         self.memory = memory or AgentMemory(incidents=self.knowledge)
@@ -286,13 +291,14 @@ class SREAgentNodes:
         # Static content (catalog, response plan) leads for prompt-prefix
         # caching; the per-incident skill guidance (capped per skill by the
         # registry) comes last.
+        response_plan = self._response_plan_for(incident)
         plan = await generate_structured(
             system_prompt=(
                 "You are the mitigation planner of an SRE agent. Propose the "
                 "smallest safe set of actions. Prefer registered skill tools "
                 "(set skill_name and tool_name exactly):\n"
                 + self.skills.catalog_text()
-                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
+                + (f"\n\nIncident response plan:\n{response_plan}" if response_plan else "")
                 + (
                     f"\n\nActive skill guidance:\n{self.skills.active_guidance()}"
                     if relevant_skills else ""
@@ -312,6 +318,13 @@ class SREAgentNodes:
         if not plan.actions:
             plan = heuristic()
         return {"mitigation_plan": plan, "status": IncidentStatus.PROPOSING}
+
+    def _response_plan_for(self, incident: Incident) -> str:
+        """App-scoped response plan overrides the global default, when present."""
+        app_plan = get_settings().apps_dir / incident.app_code / "response_plan.md"
+        if app_plan.exists():
+            return app_plan.read_text(encoding="utf-8")
+        return self.response_plan
 
     @staticmethod
     def _default_parameters(names: List[str], incident: Incident) -> Dict[str, Any]:
@@ -393,6 +406,37 @@ class SREAgentNodes:
             }
 
         decisions = self.gate.evaluate_plan(plan.actions, incident.environment)
+
+        rca = state["root_cause"]
+        alert_text = f"{incident.alert.title} {incident.alert.description}"
+        match = self.known_errors.find_match(
+            app_code=incident.app_code,
+            service_name=incident.service_name,
+            alert_text=alert_text,
+            environment=incident.environment,
+            rca_confidence=rca.confidence,
+        )
+        if match is not None:
+            actions_by_id = {a.action_id: a for a in plan.actions}
+            for i, decision in enumerate(decisions):
+                # Deny always wins: a known error never overrides a denial,
+                # only a require_approval outcome.
+                if decision.outcome != GateOutcome.REQUIRE_APPROVAL:
+                    continue
+                action = actions_by_id.get(decision.action_id)
+                if action is None or not self.known_errors.covers(match, action):
+                    continue
+                decisions[i] = GateDecision(
+                    action_id=decision.action_id,
+                    outcome=GateOutcome.ALLOW,
+                    matched_rule=f"known-error:{match.id}",
+                    reason=f"Pre-approved by known error '{match.id}' ({match.approved_by})",
+                )
+                log_step(
+                    "gate_preapproved", "allowed", incident.incident_id,
+                    known_error=match.id, action_id=action.action_id,
+                )
+
         return {"gate_decisions": decisions, "hook_results": hook_results}
 
     async def await_approval(self, state: SREState) -> Dict[str, Any]:
@@ -429,12 +473,22 @@ class SREAgentNodes:
 
     async def auto_approve(self, state: SREState) -> Dict[str, Any]:
         """All gated actions were allowed by policy — record it."""
+        known_error_ids = sorted(
+            {
+                d.matched_rule.split(":", 1)[1]
+                for d in state.get("gate_decisions", [])
+                if d.matched_rule and d.matched_rule.startswith("known-error:")
+            }
+        )
+        reason = "All actions allowed by gate policy"
+        if known_error_ids:
+            reason += f". Pre-approved via known error(s): {', '.join(known_error_ids)}"
         return {
             "approval": ApprovalRecord(
                 approved=True,
                 approver="permission-gate",
                 channel="auto",
-                reason="All actions allowed by gate policy",
+                reason=reason,
             ),
             "status": IncidentStatus.MITIGATING,
         }
@@ -446,9 +500,12 @@ class SREAgentNodes:
     async def execute_mitigation(self, state: SREState) -> Dict[str, Any]:
         """Run approved (non-denied) actions through the skill executor."""
         incident_id = state["incident"].incident_id
+        gate_decisions = {
+            d.action_id: d for d in state.get("gate_decisions", [])
+        }
         denied = {
-            d.action_id
-            for d in state.get("gate_decisions", [])
+            action_id
+            for action_id, d in gate_decisions.items()
             if d.outcome == GateOutcome.DENY
         }
         results: List[ActionResult] = []
@@ -463,9 +520,34 @@ class SREAgentNodes:
                     )
                 )
                 continue
-            results.append(
-                await self.executor.execute(action, incident_id=incident_id)
-            )
+            result = await self.executor.execute(action, incident_id=incident_id)
+            results.append(result)
+
+            # Circuit breaker: an action that failed after being
+            # pre-approved by a known error revokes that pre-approval so it
+            # doesn't keep firing blind on future incidents.
+            decision = gate_decisions.get(action.action_id)
+            if (
+                not result.success
+                and decision is not None
+                and decision.matched_rule
+                and decision.matched_rule.startswith("known-error:")
+            ):
+                record_id = decision.matched_rule.split(":", 1)[1]
+                record = self.known_errors.get(record_id)
+                if record is not None:
+                    self.known_errors.disable(
+                        record,
+                        reason=(
+                            f"Action {action.action_id} ({action.name}) failed after "
+                            f"pre-approval: {result.error or 'unknown error'}"
+                        ),
+                    )
+                    log_step(
+                        "known_error_circuit_breaker", "disabled", incident_id,
+                        known_error=record_id, action_id=action.action_id,
+                        level=logging.WARNING,
+                    )
 
         executed = [r for r in results if r.error != "Denied by permission gate"]
         success = bool(executed) and all(r.success for r in executed)
@@ -519,6 +601,60 @@ class SREAgentNodes:
             outcome=outcome,
         )
 
+    def _learn_known_errors(self, state: SREState) -> None:
+        """Known-error feedback loop: confirm successes, draft new candidates.
+
+        Every executed action whose gate decision came from a known-error
+        pre-approval gets its record's success_count bumped. Separately,
+        when a human (not the gate/auto path) approved the plan and its
+        skill actions all succeeded, track it as a promotion candidate —
+        the same mitigation recurring enough times drafts a new (disabled)
+        known-error record for review.
+        """
+        incident = state["incident"]
+        plan = state["mitigation_plan"]
+        execution = state["execution"]
+        gate_decisions = {d.action_id: d for d in state.get("gate_decisions", [])}
+
+        for action, result in zip(plan.actions, execution.results):
+            if not result.success:
+                continue
+            decision = gate_decisions.get(action.action_id)
+            if not (decision and decision.matched_rule and decision.matched_rule.startswith("known-error:")):
+                continue
+            record_id = decision.matched_rule.split(":", 1)[1]
+            record = self.known_errors.get(record_id)
+            if record is not None:
+                self.known_errors.record_success(record)
+
+        approval = state.get("approval")
+        is_human_approval = bool(
+            approval
+            and approval.approver not in ("permission-gate", "auto")
+            and approval.channel != "auto"
+        )
+        if not is_human_approval:
+            return
+
+        successful_skill_actions = [
+            a for a, r in zip(plan.actions, execution.results)
+            if r.success and a.kind == "skill"
+        ]
+        if not successful_skill_actions:
+            return
+
+        draft_path = self.known_errors.record_candidate(
+            app_code=incident.app_code,
+            service_name=incident.service_name,
+            alert_title=incident.alert.title,
+            actions=successful_skill_actions,
+        )
+        if draft_path:
+            log_step(
+                "known_error_draft", "created", incident.incident_id,
+                path=str(draft_path),
+            )
+
     async def resolve(self, state: SREState) -> Dict[str, Any]:
         """Close the loop: validate via Stop hooks, update ticket, learn."""
         incident = state["incident"]
@@ -571,6 +707,8 @@ class SREAgentNodes:
         self.memory.capture_session_insight(
             self._build_session_insight(state, outcome="resolved")
         )
+
+        self._learn_known_errors(state)
 
         ticket = state.get("ticket")
         if ticket:

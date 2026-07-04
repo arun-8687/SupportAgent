@@ -91,6 +91,9 @@ class ResourceRef(BaseModel):
     resource_type: Optional[str] = None
     region: Optional[str] = None
     environment: Literal["prod", "staging", "dev"] = "prod"
+    # Owning application/team code. "UNMAPPED" is the quarantine default:
+    # an untagged resource must never inherit another app's pre-approvals.
+    app_code: str = "UNMAPPED"
 
 
 class IncidentAlert(BaseModel):
@@ -113,6 +116,7 @@ class Incident(BaseModel):
     severity: Severity = Severity.SEV3
     service_name: str = "unknown"
     environment: Literal["prod", "staging", "dev"] = "prod"
+    app_code: str = "UNMAPPED"
     tags: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

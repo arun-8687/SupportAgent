@@ -411,6 +411,64 @@ Deny rules always win; unmatched actions fall through to the default.
 `autonomous_mode` may auto-allow **low-risk** unmatched actions — never in
 `prod`.
 
+### Known errors (pre-approved mitigations)
+
+Blanket gate rules approve an *action* regardless of what's wrong ("restart
+is always fine"). A **known error** pre-approves a *(symptom, action)* pair
+instead — "restart payment-service *when it's the recurring OOM we've seen
+before*" — so the agent can skip the human wait only when the incident
+actually matches a signature an operator has vetted. Records are markdown
+with frontmatter, authored per app:
+
+```
+data/
+  known_errors/*.md                 # global, apply estate-wide
+  apps/<APP_CODE>/known_errors/*.md  # scoped to one app code
+  apps/<APP_CODE>/response_plan.md    # per-app response-plan override
+```
+
+```markdown
+---
+id: ke-payment-oom
+service_name: payment-service        # optional; omit = any service in the app
+error_signature: memory OOMKilled MemoryWorkingSet heap   # keyword-matched vs alert
+min_signature_match: 0.5             # fraction of signature tokens in the alert
+min_rca_confidence: 0.6             # RCA confidence required to use it
+approved_actions:
+  - {skill_name: aks-memory-pressure, tool_name: restart_aks_deployment}
+environments: [prod]
+approved_by: platform-oncall@org.com
+expires: 2026-10-01                 # pre-approvals decay; must be re-reviewed
+enabled: true
+---
+Rationale for humans.
+```
+
+At the gate, a matching record upgrades each **covered** action from
+`require_approval` to `allow` (cited in the ticket as `known-error:<id>`).
+Everything that makes this safe is enforced in code, not left to the record:
+
+- **Deny always wins** — a known error never overrides a `deny`.
+- **High-risk actions are never pre-approvable**, regardless of the record.
+- **Partial coverage still pauses** — if any proposed action isn't covered
+  (e.g. a manual "review the correlated deploy" step), the incident still
+  waits for a human; only the covered actions are pre-cleared.
+- **`app_code == UNMAPPED` is quarantined** — an untagged resource matches
+  no record, global or otherwise, so a missing tag can never inherit
+  another app's pre-approval. (`app_code` comes from the alert: Azure
+  `customProperties`, PagerDuty custom fields, ServiceNow `u_app_code`, or
+  a `service_name → app_code` mapping file.)
+- **Circuit breaker** — the first time a pre-approved action *fails*, its
+  record is auto-disabled and the incident escalates; "known" means the fix
+  works, and the first counterexample revokes trust.
+- **Earned, never self-granted** — after the same human-approved mitigation
+  recurs `known_error_promotion_threshold` times, the agent drafts a record
+  with `enabled: false` for a human to review and switch on. Nothing in the
+  code path can enable a pre-approval automatically.
+
+This is how the agent earns autonomy one vetted error at a time — the
+controlled alternative to a blanket `autonomous_mode` switch.
+
 ---
 
 ## Memory & knowledge
@@ -550,6 +608,9 @@ All settings via environment variables with prefix `SRE_AGENT_` (see
 | `LLM_MAX_CONCURRENCY` / `LLM_RETRY_ATTEMPTS` / `LLM_RETRY_BASE_DELAY_SECONDS` | `4` / `3` / `2.0` | LLM throttling |
 | `DATA_DIR` | `data` | base dir for all mutable state — durable shared mount in production |
 | `KNOWLEDGE_PATH` / `MEMORIES_DIR` / `KNOWLEDGE_BASE_DIR` | derived from `DATA_DIR` | per-store overrides |
+| `APPS_DIR` / `KNOWN_ERRORS_DIR` | derived from `DATA_DIR` | per-app content root (`apps/<APP_CODE>/…`) and global known-error records |
+| `APP_CODE_MAP_FILE` | — | optional YAML `service_name → app_code` fallback when the alert carries no app code |
+| `KNOWN_ERROR_PROMOTION_THRESHOLD` | `3` | human-approved recurrences before a pre-approval draft is written |
 | `DATABASE_URL` | — | Postgres: checkpointer + alert ledger + pending approvals |
 | `CHECKPOINT_RETENTION_DAYS` | `14` | prune finished threads older than this |
 | `ALLOW_MOCK_DATA` | dev: `true`, prod: `false` | explicit override for mock fallbacks |

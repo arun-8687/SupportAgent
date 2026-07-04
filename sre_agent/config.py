@@ -93,6 +93,19 @@ class SREAgentSettings(BaseSettings):
     memories_dir: Optional[Path] = None        # default: data_dir/memories
     knowledge_base_dir: Optional[Path] = None  # default: data_dir/knowledge_base
 
+    # --- App scoping / known errors ---
+    # Per-app directories: apps_dir/<APP_CODE>/known_errors/*.md,
+    # apps_dir/<APP_CODE>/response_plan.md.
+    apps_dir: Optional[Path] = None            # default: data_dir/apps
+    known_errors_dir: Optional[Path] = None    # default: data_dir/known_errors (global records)
+    # Optional YAML mapping of service_name -> app_code, used as a fallback
+    # when a normalizer can't read app_code directly off the alert payload.
+    app_code_map_file: Optional[Path] = None
+    # Promotion tracker: how many times the same (app_code, service_name,
+    # actions) combination must recur before a draft known-error record is
+    # written for human review.
+    known_error_promotion_threshold: int = 3
+
     # --- Ticketing ---
     ticket_platform: str = "console"  # console | servicenow | pagerduty
     servicenow_instance: Optional[str] = None
@@ -116,6 +129,10 @@ class SREAgentSettings(BaseSettings):
             self.memories_dir = self.data_dir / "memories"
         if self.knowledge_base_dir is None:
             self.knowledge_base_dir = self.data_dir / "knowledge_base"
+        if self.apps_dir is None:
+            self.apps_dir = self.data_dir / "apps"
+        if self.known_errors_dir is None:
+            self.known_errors_dir = self.data_dir / "known_errors"
 
     @property
     def is_production(self) -> bool:
