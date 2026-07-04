@@ -5,11 +5,6 @@ langgraph>=0.3.27
 langchain-core>=0.3.0
 langchain-openai>=0.2.0     # optional at runtime; heuristics used when unconfigured
 
-# MCP: first-party servers (sre_agent/mcp_servers/) + client used to load
-# their tools into the mcp_diagnostics subagent
-mcp>=1.2.0
-langchain-mcp-adapters>=0.1.0
-
 # Event-driven trigger
 azure-servicebus>=7.11.0
 azure-functions>=1.18.0     # only needed for the Functions trigger surface
@@ -32,6 +27,7 @@ httpx>=0.26.0
 #                                       # (enabled by APPLICATIONINSIGHTS_CONNECTION_STRING)
 
 # Optional extras
+# langchain-mcp-adapters>=0.1.0   # enable MCP connectors (sre_agent/mcp)
 
 # Tests
 pytest>=8.0.0

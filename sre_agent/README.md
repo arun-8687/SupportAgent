@@ -145,7 +145,7 @@ graph TD
     intake -->|investigation_started hooks| triage
     triage -.->|test / duplicate| suppress
     triage -.->|unified memory search| plan_investigation
-    plan_investigation -.->|"Send fan-out (parallel)"| run_subagent["run_subagent × N<br/>logs_metrics / source_code /<br/>architecture / scanning /<br/>mcp_diagnostics / custom agents"]
+    plan_investigation -.->|"Send fan-out (parallel)"| run_subagent["run_subagent × N<br/>logs_metrics / source_code /<br/>architecture / scanning /<br/>custom YAML agents"]
     run_subagent -->|findings merge| analyze_root_cause
     analyze_root_cause --> propose_mitigation
     propose_mitigation -->|"skills loaded by relevance<br/>(SKILL.md guidance)"| open_ticket
@@ -258,10 +258,10 @@ flowchart TB
 | --- | --- | --- |
 | Incident trigger (PagerDuty / ServiceNow / Azure Monitor) | Service Bus **topic** subscription; payloads normalized per source | `triggers/`, `integrations/normalizers.py` |
 | **Skills** (`SKILL.md` + attached tools) | Single `SKILL.md` per skill: YAML frontmatter (name, description, tools) + markdown guidance body + supporting `.md` files; loaded by relevance, max 5 active with LRU auto-unload | `skills/` |
-| **Built-in subagents** (architecture, logs & metrics, source code, RCA, scanning) | Six built-in Python subagents (five fixed-query + one dynamic MCP tool-caller) + registry | `subagents/` |
+| **Built-in subagents** (architecture, logs & metrics, source code, RCA, scanning) | Five built-in Python subagents + registry | `subagents/` |
 | **Custom agents** (`handoff_description`, `allowed_skills`, `tools`; body = system prompt) | Markdown files in `subagents/custom/` (frontmatter + prompt body), auto-registered; legacy YAML accepted | `subagents/custom_loader.py` |
 | Python tools | Observability, deployment-correlation, ticketing clients | `tools/` |
-| **MCP servers** (40+ connectors: Datadog, Prometheus, Grafana, … or your own) | Config-driven loader (`mcp/servers.yaml`) + three first-party read-only servers shipped in-repo (kubectl/Azure/knowledge) + the `mcp_diagnostics` subagent's bounded tool-calling loop that actually consumes them | `mcp/`, `mcp_servers/`, `subagents/mcp_diagnostics.py` |
+| MCP servers | YAML server config + adapter loader | `mcp/` |
 | **Agent hooks** (`Stop`, `PostToolUse`; prompt/command executors; `matcher`, `failMode`, `$ARGUMENTS`, exit-code-2 blocks) | Full documented contract + lifecycle events | `hooks/` |
 | **Permission gate** (pre-execution safety layer) | Policy rules: glob / risk / environment → allow / deny / require_approval | `gate/` |
 | **Synthesized knowledge** (`memories/synthesizedKnowledge/` markdown) | `overview.md` (always loaded, ~2,000-char budget) + semantic topic files merged on update | `memory/synthesized.py` |
@@ -369,35 +369,10 @@ mode and a mock mode; in production strict mode the mock paths raise instead.
 
 ### MCP servers
 
-`mcp/servers.yaml` declares connections; enabled entries are loaded through
-`langchain-mcp-adapters` and become tools the **`mcp_diagnostics`** subagent
-can call. Credentials come from `${ENV_VAR}` references, never inline.
-
-Three first-party servers ship in `sre_agent/mcp_servers/` and are **enabled
-by default** — they are diagnostic-only by construction (no mutating tool
-exists in any of them, so there is nothing for the permission gate to need
-to catch):
-
-| Server | Tools | Requires |
-| --- | --- | --- |
-| `kubectl-readonly` | `get_pods`, `describe_pod`, `pod_logs` (with `previous=true` for crashed containers), `top_pods`, `get_hpa` | `kubectl` on PATH, current context set |
-| `azure-readonly` | `resource_show`, `resource_health`, `metrics_list`, `webapp_show`, `aks_show` | Azure CLI on PATH, authenticated |
-| `knowledge-search` | `search_knowledge`, `remember_fact`, `list_knowledge_documents` (in-process — reads the same `SRE_AGENT_DATA_DIR` the running agent writes to) | nothing extra |
-
-Run any of them standalone (also usable from Claude Desktop/Code, VS Code,
-or another agent): `python -m sre_agent.mcp_servers.kubectl_readonly`.
-
-The **`mcp_diagnostics`** subagent (`subagents/mcp_diagnostics.py`) is the
-only subagent that reasons dynamically instead of running a fixed query: it
-binds every enabled server's tools to the LLM and runs a bounded
-(`MAX_TOOL_ITERATIONS = 4`) tool-calling loop, letting the model decide which
-diagnostics the incident actually needs. Every tool result is fenced as
-`<external_data>` before re-entering the conversation, and every call logs a
-`mcp_tool_call` step. It's added to the investigation plan for prod/SEV1/SEV2
-incidents (extra LLM round-trips only where they're worth the latency); with
-no LLM configured it falls back to one deterministic `search_knowledge` call,
-and with no MCP servers enabled it contributes no evidence — never a hard
-failure.
+`mcp/servers.yaml` declares connections (Grafana, Prometheus, GitHub, …);
+enabled entries are loaded through `langchain-mcp-adapters` and become tools
+subagents can call. Credentials come from `${ENV_VAR}` references, never
+inline.
 
 ### Agent hooks
 
@@ -606,7 +581,6 @@ sre_agent/
 ├── subagents/
 │   ├── base.py                # collect() + analyze() template
 │   ├── logs_metrics.py / source_code.py / architecture.py / scanning.py
-│   ├── mcp_diagnostics.py     # bounded MCP tool-calling loop (dynamic)
 │   ├── root_cause.py          # synthesis subagent
 │   ├── custom_loader.py       # markdown custom agents (legacy YAML too)
 │   ├── custom/                # drop custom agent .md files here
@@ -631,12 +605,7 @@ sre_agent/
 ├── tools/
 │   ├── observability.py / deployments.py / ticketing.py
 ├── mcp/
-│   ├── servers.yaml / loader.py     # client config: which servers are enabled
-├── mcp_servers/                     # first-party servers (enabled by default)
-│   ├── _shell.py                    # shared allowlist/validation/exec helper
-│   ├── kubectl_readonly.py          # get_pods, describe_pod, pod_logs, top_pods, get_hpa
-│   ├── azure_readonly.py            # resource_show, metrics_list, webapp_show, aks_show
-│   └── knowledge_search.py          # search_knowledge, remember_fact (in-process)
+│   ├── servers.yaml / loader.py
 ├── integrations/
 │   └── normalizers.py         # Azure Monitor / PagerDuty / ServiceNow / custom
 ├── triggers/

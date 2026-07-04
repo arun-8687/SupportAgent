@@ -1,39 +1,11 @@
 # MCP server connections.
 #
 # Each entry becomes a set of extra tools available to subagents via the
-# Model Context Protocol (loaded with langchain-mcp-adapters). Enabled
-# servers' tools are loaded by the mcp_diagnostics subagent
-# (subagents/mcp_diagnostics.py) at investigation time.
-#
-# The three first-party servers below ship in this package
-# (sre_agent/mcp_servers/) and are enabled by default: they are read-only
-# by construction (diagnostic verbs only — get/describe/logs/top for
-# kubectl, show/list for az, search/list for knowledge) with no mutating
-# tool, so there is nothing here for the permission gate to need to catch.
-# Disable any you don't need (e.g. no AKS in your estate) to keep the
-# tool catalog focused.
+# Model Context Protocol (loaded with langchain-mcp-adapters when the
+# optional dependency is installed). Disabled by default — enable per
+# environment and provide credentials via env vars, never inline.
 
 servers:
-  - name: kubectl-readonly
-    enabled: true
-    transport: stdio
-    command: python
-    args: ["-m", "sre_agent.mcp_servers.kubectl_readonly"]
-
-  - name: azure-readonly
-    enabled: true
-    transport: stdio
-    command: python
-    args: ["-m", "sre_agent.mcp_servers.azure_readonly"]
-
-  - name: knowledge-search
-    enabled: true
-    transport: stdio
-    command: python
-    args: ["-m", "sre_agent.mcp_servers.knowledge_search"]
-
-  # --- Third-party examples: disabled until you provide credentials ---
-
   - name: grafana
     enabled: false
     transport: streamable_http
