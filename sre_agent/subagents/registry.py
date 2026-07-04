@@ -19,6 +19,7 @@ from sre_agent.subagents.architecture import ArchitectureSubagent
 from sre_agent.subagents.base import Subagent
 from sre_agent.subagents.custom_loader import load_custom_agents
 from sre_agent.subagents.logs_metrics import LogsMetricsSubagent
+from sre_agent.subagents.mcp_diagnostics import MCPDiagnosticsSubagent
 from sre_agent.subagents.root_cause import RootCauseSubagent
 from sre_agent.subagents.scanning import ScanningSubagent
 from sre_agent.subagents.source_code import SourceCodeSubagent
@@ -39,6 +40,7 @@ class SubagentRegistry:
             SourceCodeSubagent(),
             ArchitectureSubagent(),
             ScanningSubagent(),
+            MCPDiagnosticsSubagent(),
         ):
             self.register(subagent)
         # YAML-defined custom agents register alongside the built-ins.

@@ -170,15 +170,24 @@ class SREAgentNodes:
 
         def heuristic() -> InvestigationPlan:
             selected = ["logs_metrics", "source_code"]
-            if incident.environment == "prod" or triage.severity in (Severity.SEV1, Severity.SEV2):
+            high_stakes = incident.environment == "prod" or triage.severity in (
+                Severity.SEV1, Severity.SEV2,
+            )
+            if high_stakes:
                 selected.append("architecture")
             selected.append("scanning")
+            if high_stakes:
+                # Extra LLM round-trips only for incidents where the added
+                # dynamic diagnostics (live kubectl/az/knowledge queries)
+                # are worth the latency/cost; degrades to a no-op without
+                # MCP servers or an LLM configured.
+                selected.append("mcp_diagnostics")
             return InvestigationPlan(
                 subagents=selected,
                 reasoning=(
                     f"Category '{triage.category}' at {triage.severity.value}: telemetry and "
-                    "change correlation always run; topology and config scan added for "
-                    "high-severity/production incidents."
+                    "change correlation always run; topology, config scan, and dynamic MCP "
+                    "diagnostics added for high-severity/production incidents."
                 ),
             )
 
