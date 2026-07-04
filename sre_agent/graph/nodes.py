@@ -185,16 +185,19 @@ class SREAgentNodes:
         overview = self.memory.system_context()
         memory_context = "\n".join(
             f"- [{m.source}:{m.citation}] {m.content[:160]}"
-            for m in triage.memory_matches[:4]
+            for m in triage.memory_matches[:3]
         )
+        # Prompt layout: fully static content first (identical across
+        # incidents -> provider prompt-prefix caching), per-incident
+        # context last. The response plan is mitigation/escalation
+        # guidance — it belongs to the proposer, not to subagent selection.
         plan = await generate_structured(
             system_prompt=(
                 "You are the investigation planner of an SRE agent. Choose which "
                 "subagents to run for this incident. Available subagents "
                 "(handoff descriptions):\n" + self.subagents.descriptions()
-                + (f"\n\nEnvironment overview:\n{overview}" if overview else "")
-                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
                 + f"\n\n{EXTERNAL_DATA_CAUTION}"
+                + (f"\n\nEnvironment overview:\n{overview}" if overview else "")
             ),
             user_prompt=(
                 f"Incident: {triage.summary}\n"
@@ -280,22 +283,25 @@ class SREAgentNodes:
                 expected_outcome="Restore service health and stop the failure trend.",
             )
 
+        # Static content (catalog, response plan) leads for prompt-prefix
+        # caching; the per-incident skill guidance (capped per skill by the
+        # registry) comes last.
         plan = await generate_structured(
             system_prompt=(
                 "You are the mitigation planner of an SRE agent. Propose the "
                 "smallest safe set of actions. Prefer registered skill tools "
                 "(set skill_name and tool_name exactly):\n"
                 + self.skills.catalog_text()
+                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
                 + (
                     f"\n\nActive skill guidance:\n{self.skills.active_guidance()}"
                     if relevant_skills else ""
                 )
-                + (f"\n\nIncident response plan:\n{self.response_plan}" if self.response_plan else "")
             ),
             user_prompt=(
                 f"Root cause: {rca.hypothesis} (confidence {rca.confidence})\n"
                 f"Service: {incident.service_name} ({incident.environment})\n"
-                f"Impact: {rca.impact_assessment}"
+                f"Impact: {rca.impact_assessment[:400]}"
             ),
             schema=MitigationPlan,
             fallback=heuristic,

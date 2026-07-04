@@ -24,15 +24,32 @@ class RootCauseSubagent:
 
     name = "root_cause"
 
+    # Each subagent already distilled its evidence into summary +
+    # suspected_cause; synthesis needs only the strongest supporting lines,
+    # not a second full copy of every observation.
+    MAX_EVIDENCE_PER_FINDING = 5
+    MAX_OBSERVATION_CHARS = 180
+
+    def _format_findings(self, findings: List[SubagentFinding]) -> str:
+        sections = []
+        for f in findings:
+            lines = [
+                f"## {f.subagent} (confidence {f.confidence})",
+                f.summary[:400],
+                f"Suspected cause: {(f.suspected_cause or 'n/a')[:240]}",
+            ]
+            for e in f.evidence[: self.MAX_EVIDENCE_PER_FINDING]:
+                lines.append(f"- [{e.source}] {e.observation[: self.MAX_OBSERVATION_CHARS]}")
+            omitted = len(f.evidence) - self.MAX_EVIDENCE_PER_FINDING
+            if omitted > 0:
+                lines.append(f"(+{omitted} more evidence items)")
+            sections.append("\n".join(lines))
+        return "\n\n".join(sections)
+
     async def synthesize(
         self, incident: Incident, findings: List[SubagentFinding]
     ) -> RootCauseAnalysis:
-        findings_text = "\n\n".join(
-            f"## {f.subagent} (confidence {f.confidence})\n{f.summary}\n"
-            f"Suspected cause: {f.suspected_cause or 'n/a'}\n"
-            + "\n".join(f"- [{e.source}] {e.observation}" for e in f.evidence)
-            for f in findings
-        )
+        findings_text = self._format_findings(findings)
         return await generate_structured(
             system_prompt=(
                 "You are the root-cause-analysis subagent of an SRE "

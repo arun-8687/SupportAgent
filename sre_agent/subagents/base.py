@@ -52,16 +52,35 @@ class Subagent(ABC):
     async def collect(self, incident: Incident) -> List[Evidence]:
         """Gather raw evidence using domain tools."""
 
+    @staticmethod
+    def _format_evidence(evidence: List[Evidence]) -> str:
+        """Token-lean evidence rendering.
+
+        The observation is the distilled signal; raw `data` mostly repeats
+        it, so it is appended only when present and tightly capped. Caps
+        keep a noisy collector (many log rows) from blowing up the prompt
+        without losing what the analysis actually keys on.
+        """
+        lines = []
+        for e in evidence[:15]:
+            line = f"- [{e.source}] {e.observation[:240]}"
+            if e.data:
+                data = json.dumps(e.data, default=str)
+                if len(data) > 200:
+                    data = data[:200] + "…"
+                line += f" | {data}"
+            lines.append(line)
+        if len(evidence) > 15:
+            lines.append(f"(+{len(evidence) - 15} more evidence items omitted)")
+        return "\n".join(lines)
+
     async def analyze(self, incident: Incident, evidence: List[Evidence]) -> SubagentFinding:
         """Default LLM analysis over collected evidence.
 
         Alert text and gathered telemetry originate from external systems,
         so they are fenced as untrusted data in the prompt.
         """
-        evidence_text = "\n".join(
-            f"- [{e.source}] {e.observation} | data: {json.dumps(e.data, default=str)[:400]}"
-            for e in evidence
-        )
+        evidence_text = self._format_evidence(evidence)
         return await generate_structured(
             system_prompt=(
                 f"You are the '{self.name}' subagent of an SRE incident-response "

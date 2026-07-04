@@ -244,11 +244,20 @@ class SkillRegistry:
     def is_active(self, name: str) -> bool:
         return name in self._active
 
-    def active_guidance(self) -> str:
-        """Concatenated SKILL.md guidance of all active skills."""
-        return "\n\n---\n\n".join(
-            f"# Skill: {name}\n{content}" for name, content in self._active.items()
-        )
+    # Mirrors the Agent Skills spec guidance to keep a SKILL.md body under
+    # ~5k tokens; an operator's oversized skill must not blow the prompt.
+    MAX_GUIDANCE_CHARS_PER_SKILL = 2500
+
+    def active_guidance(self, max_chars_per_skill: Optional[int] = None) -> str:
+        """Concatenated SKILL.md guidance of all active skills (capped)."""
+        cap = max_chars_per_skill or self.MAX_GUIDANCE_CHARS_PER_SKILL
+        sections = []
+        for name, content in self._active.items():
+            body = content
+            if len(body) > cap:
+                body = body[:cap] + "\n…[guidance truncated for length]"
+            sections.append(f"# Skill: {name}\n{body}")
+        return "\n\n---\n\n".join(sections)
 
     def reset_active(self) -> None:
         """Active skills clear on conversation compaction / new incident."""
