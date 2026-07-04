@@ -29,7 +29,10 @@ TModel = TypeVar("TModel", bound=BaseModel)
 
 _chat_model = None
 _chat_model_initialized = False
-_semaphore: Optional[asyncio.Semaphore] = None
+# Semaphores are bound to the event loop that created them; keying by the
+# running loop avoids RuntimeError when triggers use fresh loops
+# (asyncio.run per CLI/Functions invocation).
+_semaphores: dict = {}
 
 
 class LLMUnavailableError(RuntimeError):
@@ -72,10 +75,14 @@ def get_chat_model():
 
 
 def _get_semaphore() -> asyncio.Semaphore:
-    global _semaphore
-    if _semaphore is None:
-        _semaphore = asyncio.Semaphore(get_settings().llm_max_concurrency)
-    return _semaphore
+    loop = asyncio.get_running_loop()
+    semaphore = _semaphores.get(id(loop))
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(get_settings().llm_max_concurrency)
+        if len(_semaphores) > 8:  # closed loops leave stale entries; cap them
+            _semaphores.clear()
+        _semaphores[id(loop)] = semaphore
+    return semaphore
 
 
 async def _invoke_with_retry(coro_factory):

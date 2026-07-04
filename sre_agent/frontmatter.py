@@ -18,7 +18,11 @@ from typing import Any, Dict, Tuple
 
 import yaml
 
-_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z", re.DOTALL)
+# Tolerates a UTF-8 BOM and leading blank lines before the opening fence —
+# a Windows editor's BOM must not silently drop a skill from the registry.
+_FRONTMATTER_RE = re.compile(
+    "\\A\\ufeff?\\s*---\\s*\\n(.*?)\\n---\\s*\\n?(.*)\\Z", re.DOTALL
+)
 
 
 def parse_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:

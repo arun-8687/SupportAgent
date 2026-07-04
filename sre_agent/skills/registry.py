@@ -36,16 +36,11 @@ from pydantic import BaseModel, Field
 from sre_agent.config import get_settings
 from sre_agent.frontmatter import parse_frontmatter
 from sre_agent.models import RiskLevel
+from sre_agent.textsearch import tokens as _tokens
 
 logger = logging.getLogger(__name__)
 
 MAX_ACTIVE_SKILLS = 5
-
-_WORD_RE = re.compile(r"[a-z0-9]+")
-
-
-def _tokens(text: str) -> set:
-    return set(_WORD_RE.findall(text.lower()))
 
 
 class SkillTool(BaseModel):

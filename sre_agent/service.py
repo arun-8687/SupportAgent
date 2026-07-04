@@ -48,28 +48,53 @@ class SREAgentService:
         self.alert_ledger = alert_ledger or create_alert_ledger()
         self.pending_approvals = pending_approvals or create_pending_approval_store()
 
-    async def handle_alert(
+    def register_alert(
         self, payload: Dict[str, Any], source_hint: str = ""
     ) -> Dict[str, Any]:
-        """Normalize an alert payload and run the investigation graph."""
+        """Phase 1 of intake: normalize + claim (fast, no LLM/graph work).
+
+        Split from the investigation so triggers can acknowledge the
+        message only AFTER the alert is durably claimed (with its payload
+        stored for crash recovery), closing the ack-then-crash loss window.
+
+        Returns {"action": "investigate", "incident": ...} or
+        {"action": "skip", "response": {...}}.
+        """
         alert = normalize(payload, source_hint)
         incident = to_incident(alert)
 
-        # Idempotent intake: Service Bus delivers at-least-once, so the same
-        # alert_id can arrive again (lock expiry, crash, retry). The ledger
-        # claim is atomic — redeliveries map back to the original incident
-        # instead of spawning a duplicate investigation and ticket.
+        # Idempotent intake: Service Bus delivers at-least-once. The claim
+        # is atomic and stores the raw payload until the investigation
+        # reaches a durable state, so no crash window drops the alert.
         storm_key = f"{incident.service_name}:{alert.title[:80].lower()}"
-        claim = self.alert_ledger.claim(alert.alert_id, incident.incident_id, storm_key)
+        claim = self.alert_ledger.claim(
+            alert.alert_id, incident.incident_id, storm_key, payload=payload
+        )
+
+        if claim.status == "duplicate" and not claim.processed:
+            # The earlier attempt crashed mid-investigation. Reclaim under
+            # a fresh incident and investigate again — a redelivered alert
+            # must never be silently dropped as "duplicate".
+            self.alert_ledger.reclaim(alert.alert_id, incident.incident_id)
+            log_step(
+                "alert_intake", "reclaimed", incident.incident_id,
+                alert_id=alert.alert_id, previous_incident=claim.incident_id,
+                level=logging.WARNING,
+            )
+            return {"action": "investigate", "incident": incident, "alert": alert}
+
         if claim.status == "duplicate":
             log_step(
                 "alert_intake", "duplicate", claim.incident_id,
                 alert_id=alert.alert_id, service_name=incident.service_name,
             )
             return {
-                "incident_id": claim.incident_id,
-                "status": "duplicate",
-                "note": "Alert already processed; no new investigation started.",
+                "action": "skip",
+                "response": {
+                    "incident_id": claim.incident_id,
+                    "status": "duplicate",
+                    "note": "Alert already processed; no new investigation started.",
+                },
             }
         if claim.status == "storm":
             log_step(
@@ -77,13 +102,16 @@ class SREAgentService:
                 alert_id=alert.alert_id, storm_key=storm_key,
                 level=logging.WARNING,
             )
+            note = "Storm threshold exceeded for this service+alert; suppressed."
+            if claim.incident_id:
+                note += f" See parent incident {claim.incident_id}."
             return {
-                "incident_id": claim.incident_id,
-                "status": "storm_suppressed",
-                "note": (
-                    "Storm threshold exceeded for this service+alert; suppressed. "
-                    f"See parent incident {claim.incident_id}."
-                ),
+                "action": "skip",
+                "response": {
+                    "incident_id": claim.incident_id,
+                    "status": "storm_suppressed",
+                    "note": note,
+                },
             }
 
         log_step(
@@ -91,6 +119,15 @@ class SREAgentService:
             alert_id=alert.alert_id, service_name=incident.service_name,
             source=alert.source.value, environment=incident.environment,
         )
+        return {"action": "investigate", "incident": incident, "alert": alert}
+
+    async def run_registered(self, registration: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 2 of intake: run the investigation for a claimed alert."""
+        if registration["action"] == "skip":
+            return registration["response"]
+
+        incident = registration["incident"]
+        alert = registration["alert"]
         config = {"configurable": {"thread_id": incident.incident_id}}
         state = await self.graph.ainvoke(create_initial_state(incident), config)
 
@@ -98,8 +135,10 @@ class SREAgentService:
         if interrupts:
             request = interrupts[0].value
             # Register for the timeout sweeper so a paused investigation
-            # can't hang forever waiting for a human.
+            # can't hang forever waiting for a human. The checkpoint is
+            # durable, so the claim counts as processed.
             self.pending_approvals.add(incident.incident_id)
+            self.alert_ledger.mark_processed(alert.alert_id)
             log_step(
                 "approval_request", "pending", incident.incident_id,
                 actions=len(request.get("actions", [])),
@@ -110,7 +149,40 @@ class SREAgentService:
                 "approval_request": request,
             }
 
+        self.alert_ledger.mark_processed(alert.alert_id)
         return self._final_view(incident.incident_id, state)
+
+    async def handle_alert(
+        self, payload: Dict[str, Any], source_hint: str = ""
+    ) -> Dict[str, Any]:
+        """Normalize, claim, and investigate in one call (Functions/CLI)."""
+        return await self.run_registered(self.register_alert(payload, source_hint))
+
+    async def recover_stalled_intakes(self) -> List[Dict[str, Any]]:
+        """Re-run claims that never reached a durable state.
+
+        Covers the message-already-acked crash: the graph died mid-run, no
+        redelivery will come, but the claim kept the raw payload. Called by
+        the same sweeps as approval timeouts.
+        """
+        settings = get_settings()
+        results = []
+        for intake in self.alert_ledger.stalled(settings.intake_stale_seconds):
+            if not intake.payload:
+                # Nothing to replay from; surface loudly instead of looping.
+                log_step(
+                    "alert_intake", "unrecoverable", intake.incident_id,
+                    alert_id=intake.alert_id, level=logging.ERROR,
+                )
+                self.alert_ledger.mark_processed(intake.alert_id)
+                continue
+            log_step(
+                "alert_intake", "recovering_stalled", intake.incident_id,
+                alert_id=intake.alert_id, level=logging.WARNING,
+            )
+            # handle_alert sees duplicate-unprocessed -> reclaims -> re-runs.
+            results.append(await self.handle_alert(intake.payload))
+        return results
 
     async def submit_approval(
         self,

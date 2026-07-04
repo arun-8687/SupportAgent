@@ -153,6 +153,10 @@ async def approval_sweep(timer: func.TimerRequest) -> None:
     if escalated:
         logging.warning("Sweeper escalated %d timed-out approvals", len(escalated))
 
+    recovered = await service.recover_stalled_intakes()
+    if recovered:
+        logging.warning("Sweeper recovered %d stalled intakes", len(recovered))
+
     from sre_agent.maintenance import prune_checkpoints
 
     pruned = prune_checkpoints()

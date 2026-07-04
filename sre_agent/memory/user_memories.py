@@ -7,7 +7,6 @@ files ("Production uses 3 AKS clusters in West US 2").
 """
 import json
 import logging
-import re
 import uuid
 from pathlib import Path
 from typing import List, Optional
@@ -15,10 +14,9 @@ from typing import List, Optional
 from sre_agent.config import get_settings
 from sre_agent.locking import file_lock
 from sre_agent.models import UserMemory
+from sre_agent.textsearch import tokens
 
 logger = logging.getLogger(__name__)
-
-_WORD_RE = re.compile(r"[a-z0-9]+")
 
 
 class UserMemoryStore:
@@ -39,12 +37,12 @@ class UserMemoryStore:
 
     def retrieve(self, query: str, top_k: int = 3) -> List[UserMemory]:
         """#retrieve <question> — keyword-overlap search over saved facts."""
-        query_tokens = set(_WORD_RE.findall(query.lower()))
+        query_tokens = tokens(query)
         if not query_tokens:
             return []
         scored = []
         for memory in self.load_all():
-            fact_tokens = set(_WORD_RE.findall(memory.fact.lower()))
+            fact_tokens = tokens(memory.fact)
             overlap = len(query_tokens & fact_tokens)
             if overlap:
                 scored.append((overlap, memory.created_at, memory))
@@ -55,9 +53,9 @@ class UserMemoryStore:
         """#forget <description> — remove matching memories; returns count."""
         with file_lock(self.path):
             keep, removed = [], 0
-            query_tokens = set(_WORD_RE.findall(query.lower()))
+            query_tokens = tokens(query)
             for memory in self.load_all():
-                fact_tokens = set(_WORD_RE.findall(memory.fact.lower()))
+                fact_tokens = tokens(memory.fact)
                 # Forget when most of the query matches the fact.
                 if query_tokens and len(query_tokens & fact_tokens) >= max(1, len(query_tokens) // 2):
                     removed += 1

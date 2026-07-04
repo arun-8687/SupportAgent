@@ -27,6 +27,7 @@ from sre_agent.models import (
     Incident,
     IncidentStatus,
     InvestigationPlan,
+    KnowledgeMatch,
     KnowledgeRecord,
     MitigationAction,
     MitigationPlan,
@@ -126,8 +127,19 @@ class SREAgentNodes:
         )
         # One query across all sources: past incidents (same-resource
         # prioritized), user memories, knowledge base, synthesized files.
+        # knowledge_matches is derived from the same results — no second
+        # pass over the incident store.
         memory_matches = self.memory.search(text, service_name=incident.service_name)
-        knowledge_matches = self.knowledge.search(text, service_name=incident.service_name)
+        knowledge_matches = [
+            KnowledgeMatch(
+                record_id=m.citation,
+                title=m.title,
+                resolution=m.content,
+                similarity=m.similarity,
+            )
+            for m in memory_matches
+            if m.source == "past_incident"
+        ]
 
         assessment = TriageAssessment(
             severity=severity,

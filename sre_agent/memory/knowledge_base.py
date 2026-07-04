@@ -7,12 +7,12 @@ directory; the agent searches them automatically when relevant and cites
 the source document in its answers.
 """
 import logging
-import re
 from pathlib import Path
 from typing import List, Optional
 
 from sre_agent.config import get_settings
 from sre_agent.models import MemorySearchResult
+from sre_agent.textsearch import tokens
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class KnowledgeBase:
 
     def search(self, query: str, top_k: int = 3) -> List[MemorySearchResult]:
         """Rank documents by term overlap; return excerpts with citations."""
-        terms = {t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2}
+        terms = tokens(query, min_len=3)
         if not terms:
             return []
         scored = []

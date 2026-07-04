@@ -15,17 +15,17 @@ Message contract:
 Approval messages resume investigations paused at the permission gate:
   {"incident_id": "...", "approved": true, "approver": "...", "reason": "..."}
 
-Reliability behavior:
-  - Fast-ack: the message is COMPLETED as soon as its payload is parsed,
-    before the (potentially long) investigation runs. Idempotent intake
-    (the alert ledger) is what makes this safe — a crash mid-investigation
-    loses nothing that a redelivered duplicate could fix, and the message
-    lock can never expire mid-run and cause a duplicate investigation.
+Reliability behavior (ordered to close every crash window):
+  - Alerts are CLAIMED (durably, payload included) BEFORE the message is
+    completed, then the long investigation runs after completion so the
+    lock can't expire mid-run. Crash before the claim -> message redelivers;
+    crash after the claim but before completion -> redelivery is detected
+    as an unprocessed duplicate and reclaimed; crash mid-investigation ->
+    the stalled-intake sweeper re-runs it from the stored payload.
   - Poison messages (unparseable JSON / schema garbage) are DEAD-LETTERED
     immediately with a reason instead of burning redelivery cycles.
-  - Transient failures (parse OK, processing raised) abandon the message
-    for redelivery; the ledger dedupes the retry.
-  - The approval-timeout sweeper runs between receive batches.
+  - The sweep between receive batches escalates timed-out approvals AND
+    recovers stalled intakes.
 """
 import asyncio
 import json
@@ -101,20 +101,43 @@ class ServiceBusTopicListener:
             )
             return
 
-        # Fast-ack: complete BEFORE the long-running investigation so the
-        # message lock cannot expire mid-run. The alert ledger makes any
-        # crash-and-redeliver path idempotent.
+        event_type = str(props.get("event_type", "alert"))
+
+        # Alerts: claim durably (payload stored) BEFORE completing the
+        # message, then run the long investigation after completion so the
+        # lock can't expire mid-run. Every crash window is covered by
+        # redelivery + reclaim or the stalled-intake sweeper.
+        registration = None
+        if event_type != "approval":
+            try:
+                registration = self.service.register_alert(
+                    payload, source_hint=str(props.get("source", ""))
+                )
+            except Exception:
+                logger.exception(
+                    "Claim failed for message %s; abandoning for redelivery",
+                    message.message_id,
+                )
+                await receiver.abandon_message(message)
+                return
+
         try:
             await receiver.complete_message(message)
         except Exception:
+            # Not completed -> Service Bus redelivers; the claim above makes
+            # the redelivery land as duplicate-unprocessed and get reclaimed.
             logger.exception("Failed to complete message %s; will redeliver", message.message_id)
             return
 
         try:
-            await self._process(payload, props)
+            if event_type == "approval":
+                await self._process_approval(payload)
+            else:
+                result = await self.service.run_registered(registration)
+                logger.info("Processed alert message: %s", result)
         except Exception:
-            # Message is already completed; the failure is logged and the
-            # incident (if created) is recoverable via its checkpoint.
+            # Message is completed; a crashed investigation is recovered by
+            # the stalled-intake sweeper from the claim's stored payload.
             logger.exception("Processing failed for message %s", message.message_id)
 
     @staticmethod
@@ -130,25 +153,19 @@ class ServiceBusTopicListener:
         }
         return payload, props
 
-    async def _process(self, payload: dict, props: dict) -> None:
-        event_type = str(props.get("event_type", "alert"))
-        if event_type == "approval":
-            result = await self.service.submit_approval(
-                incident_id=str(payload["incident_id"]),
-                approved=bool(payload.get("approved", False)),
-                approver=str(payload.get("approver", "service-bus")),
-                reason=str(payload.get("reason", "")),
-                channel="service_bus",
-                # A message on the private approvals subscription is treated
-                # as verified: publishing rights to the topic ARE the
-                # credential. Lock the topic down with RBAC accordingly.
-                approver_verified=True,
-            )
-        else:
-            result = await self.service.handle_alert(
-                payload, source_hint=str(props.get("source", ""))
-            )
-        logger.info("Processed %s message: %s", event_type, result)
+    async def _process_approval(self, payload: dict) -> None:
+        result = await self.service.submit_approval(
+            incident_id=str(payload["incident_id"]),
+            approved=bool(payload.get("approved", False)),
+            approver=str(payload.get("approver", "service-bus")),
+            reason=str(payload.get("reason", "")),
+            channel="service_bus",
+            # A message on the private approvals subscription is treated
+            # as verified: publishing rights to the topic ARE the
+            # credential. Lock the topic down with RBAC accordingly.
+            approver_verified=True,
+        )
+        logger.info("Processed approval message: %s", result)
 
     async def _maybe_sweep(self) -> None:
         if time.monotonic() - self._last_sweep < SWEEP_INTERVAL_SECONDS:
@@ -158,8 +175,11 @@ class ServiceBusTopicListener:
             escalated = await self.service.sweep_expired_approvals()
             if escalated:
                 logger.warning("Sweeper escalated %d timed-out approvals", len(escalated))
+            recovered = await self.service.recover_stalled_intakes()
+            if recovered:
+                logger.warning("Sweeper recovered %d stalled intakes", len(recovered))
         except Exception:
-            logger.exception("Approval sweep failed")
+            logger.exception("Sweep failed")
 
 
 async def publish_alert(payload: dict, source: str = "custom") -> None:

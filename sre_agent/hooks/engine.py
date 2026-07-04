@@ -70,7 +70,16 @@ class HookDefinition(BaseModel):
             return True
         if tool_name is None:
             return False
-        return re.match(f"^({self.matcher})$", tool_name) is not None
+        try:
+            return re.match(f"^({self.matcher})$", tool_name) is not None
+        except re.error:
+            # An invalid operator-supplied pattern must never crash the
+            # workflow after a tool's side effects already happened.
+            logger.warning(
+                "Hook %r has an invalid matcher regex %r; treating as no match",
+                self.name, self.matcher,
+            )
+            return False
 
 
 def _parse_decision(raw: str) -> Optional[Dict[str, Any]]:
@@ -111,7 +120,19 @@ class HookEngine:
         hooks = []
         for item in data.get("hooks", []):
             try:
-                hooks.append(HookDefinition.model_validate(item))
+                hook = HookDefinition.model_validate(item)
+                # Validate the matcher at load time so a typo surfaces at
+                # startup instead of mid-incident.
+                if hook.matcher and hook.matcher != "*":
+                    try:
+                        re.compile(f"^({hook.matcher})$")
+                    except re.error as exc:
+                        logger.error(
+                            "Hook %r disabled: invalid matcher regex %r (%s)",
+                            hook.name, hook.matcher, exc,
+                        )
+                        hook.enabled = False
+                hooks.append(hook)
             except Exception:
                 logger.exception("Invalid hook definition: %s", item)
         return hooks
@@ -140,13 +161,21 @@ class HookEngine:
     def blocked_by(results: List[HookResult]) -> Optional[HookResult]:
         """First result that blocks, if any.
 
-        A rejection without a reason is treated as approval (Stop-hook
-        semantics: always provide a reason when rejecting).
+        Reason-required-to-block is a STOP-hook-specific rule ("a rejection
+        without a reason is treated as approval"). For every other event —
+        PostToolUse audits, before_mitigation vetoes — a block decision
+        blocks even without a reason string; dropping a safety veto over a
+        missing message would defeat the hook layer.
         """
         for result in results:
             decision = result.decision or {}
-            if decision.get("allow") is False and decision.get("reason"):
-                return result
+            if decision.get("allow") is not False:
+                continue
+            if result.event == HookEvent.STOP and not decision.get("reason"):
+                continue
+            if not decision.get("reason"):
+                decision["reason"] = f"blocked by hook '{result.hook}' (no reason given)"
+            return result
         return None
 
     @staticmethod

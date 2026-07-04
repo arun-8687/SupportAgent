@@ -54,6 +54,10 @@ class SREAgentSettings(BaseSettings):
     # requests to the outbound topic for a separate privileged runner.
     execution_mode: str = "local"
     approval_timeout_seconds: int = 900
+    # A claimed alert whose investigation never reached a durable state
+    # (process crashed after the message was acked) is re-run from its
+    # stored payload once it is older than this.
+    intake_stale_seconds: int = 1800
     # Require an Entra-verified approver identity (X-MS-CLIENT-PRINCIPAL).
     # Defaults to True in production, False otherwise; override explicitly.
     approval_require_verified_identity: Optional[bool] = None
@@ -129,13 +133,6 @@ class SREAgentSettings(BaseSettings):
         if self.approval_require_verified_identity is not None:
             return self.approval_require_verified_identity
         return self.is_production
-
-    @property
-    def llm_configured(self) -> bool:
-        return bool(
-            (self.azure_openai_endpoint and self.azure_openai_api_key)
-            or self.openai_api_key
-        )
 
 
 @lru_cache

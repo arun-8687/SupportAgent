@@ -39,7 +39,16 @@ def render_command(tool: SkillTool, parameters: dict) -> str:
     if missing:
         raise SkillExecutionError(f"Missing parameters for {tool.name}: {missing}")
     safe = {key: shlex.quote(str(value)) for key, value in parameters.items()}
-    return tool.command.format(**safe)
+    try:
+        return tool.command.format(**safe)
+    except (KeyError, IndexError, ValueError) as exc:
+        # Literal braces in the template (kubectl jsonpath, awk, JSON
+        # patches) collide with str.format placeholders. Fail as a normal
+        # skill error — never crash the workflow node post-approval.
+        raise SkillExecutionError(
+            f"Command template for {tool.name} failed to render ({exc!r}). "
+            "Escape literal braces as '{{' and '}}' in the SKILL.md command."
+        ) from exc
 
 
 class SkillExecutor:
@@ -55,8 +64,30 @@ class SkillExecutor:
         settings = get_settings()
         self.dry_run = settings.dry_run if dry_run is None else dry_run
         self.hooks = hooks
+        # Cached Service Bus client/sender for dispatch mode — AMQP
+        # connections are designed to be long-lived; a fresh handshake per
+        # action would dominate mitigation latency.
+        self._sb_client = None
+        self._sb_sender = None
 
     async def execute(
+        self, action: MitigationAction, incident_id: Optional[str] = None
+    ) -> ActionResult:
+        """Execute one action. Never raises: any unexpected failure comes
+        back as a failed ActionResult so the workflow can escalate cleanly
+        instead of crashing mid-mitigation."""
+        try:
+            return await self._execute(action, incident_id)
+        except Exception as exc:
+            logger.exception("Unexpected executor failure for %s", action.action_id)
+            return ActionResult(
+                action_id=action.action_id,
+                success=False,
+                error=f"Unexpected executor failure: {exc}",
+                dry_run=self.dry_run,
+            )
+
+    async def _execute(
         self, action: MitigationAction, incident_id: Optional[str] = None
     ) -> ActionResult:
         started = time.monotonic()
@@ -208,21 +239,14 @@ class SkillExecutor:
         }
         try:
             from azure.servicebus import ServiceBusMessage
-            from azure.servicebus.aio import ServiceBusClient
 
-            async with ServiceBusClient.from_connection_string(
-                settings.servicebus_connection_string
-            ) as client:
-                sender = client.get_topic_sender(
-                    topic_name=settings.servicebus_outbound_topic
+            sender = await self._get_sender()
+            await sender.send_messages(
+                ServiceBusMessage(
+                    json.dumps(payload),
+                    application_properties={"event_type": "execution_request"},
                 )
-                async with sender:
-                    await sender.send_messages(
-                        ServiceBusMessage(
-                            json.dumps(payload),
-                            application_properties={"event_type": "execution_request"},
-                        )
-                    )
+            )
             return ActionResult(
                 action_id=action.action_id,
                 success=True,
@@ -232,6 +256,8 @@ class SkillExecutor:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
         except Exception as exc:
+            # Drop the cached client so the next dispatch reconnects.
+            await self._close_sender()
             return ActionResult(
                 action_id=action.action_id,
                 success=False,
@@ -239,6 +265,31 @@ class SkillExecutor:
                 dry_run=False,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+
+    async def _get_sender(self):
+        """Lazily create and reuse one Service Bus client + topic sender."""
+        if self._sb_sender is None:
+            from azure.servicebus.aio import ServiceBusClient
+
+            settings = get_settings()
+            self._sb_client = ServiceBusClient.from_connection_string(
+                settings.servicebus_connection_string
+            )
+            self._sb_sender = self._sb_client.get_topic_sender(
+                topic_name=settings.servicebus_outbound_topic
+            )
+        return self._sb_sender
+
+    async def _close_sender(self) -> None:
+        try:
+            if self._sb_sender is not None:
+                await self._sb_sender.close()
+            if self._sb_client is not None:
+                await self._sb_client.close()
+        except Exception:
+            pass
+        self._sb_sender = None
+        self._sb_client = None
 
     async def _post_tool_use(
         self,

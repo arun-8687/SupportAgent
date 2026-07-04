@@ -60,17 +60,36 @@ class SynthesizedKnowledge:
         )
 
     def search(self, query: str) -> Dict[str, str]:
-        """Topic files whose content overlaps the query (name -> excerpt)."""
-        terms = {t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2}
+        """Topic files whose content overlaps the query (name -> excerpt).
+
+        File contents are cached by mtime so a triage-time search doesn't
+        re-read every topic file from disk on every incident.
+        """
+        from sre_agent.textsearch import tokens
+
+        terms = tokens(query, min_len=3)
         if not terms:
             return {}
         hits = {}
         for name in self.topic_files():
-            content = (self.directory / name).read_text(encoding="utf-8")
-            lowered = content.lower()
+            content, lowered = self._read_cached(name)
             if sum(1 for term in terms if term in lowered) >= max(1, len(terms) // 4):
                 hits[name] = content[:1200]
         return hits
+
+    def _read_cached(self, name: str) -> tuple:
+        """(content, lowered) for a topic file, invalidated by mtime."""
+        if not hasattr(self, "_file_cache"):
+            self._file_cache = {}
+        path = self.directory / name
+        mtime = path.stat().st_mtime_ns
+        cached = self._file_cache.get(name)
+        if cached and cached[0] == mtime:
+            return cached[1], cached[2]
+        content = path.read_text(encoding="utf-8")
+        lowered = content.lower()
+        self._file_cache[name] = (mtime, content, lowered)
+        return content, lowered
 
     # -- writing ----------------------------------------------------------- #
 

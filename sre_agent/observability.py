@@ -20,7 +20,6 @@ stdlib logging — offline dev and tests need no Azure.
 """
 import logging
 import os
-import time
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
@@ -127,18 +126,3 @@ def log_step(
         " ".join(f"{k}={v}" for k, v in fields.items() if v is not None),
         extra=dimensions,
     )
-
-
-class StepTimer:
-    """Measure a step's wall time: `with StepTimer() as t: ...; t.ms`."""
-
-    def __enter__(self) -> "StepTimer":
-        self._start = time.monotonic()
-        return self
-
-    def __exit__(self, *exc) -> None:
-        pass
-
-    @property
-    def ms(self) -> int:
-        return int((time.monotonic() - self._start) * 1000)
