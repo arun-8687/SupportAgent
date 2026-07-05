@@ -1,0 +1,85 @@
+# Agent hooks — custom checkpoints intercepting agent behavior.
+#
+# Core events: Stop (agent about to finalize) and PostToolUse (a tool
+# finished; `matcher` regex selects which tools). Lifecycle events
+# (investigation_started / before_mitigation / after_resolution /
+# on_escalation) fire at workflow milestones.
+#
+# type: prompt  -> LLM evaluates; $ARGUMENTS injects the hook context;
+#                  respond {"ok": true} or {"ok": false, "reason": "..."}
+# type: command -> shell command/script; context arrives as JSON on stdin;
+#                  respond {"decision": "allow"|"block", ...} or exit 2 to block
+
+hooks:
+  # Audit every skill-tool execution and inject an audit trail note.
+  - name: audit-tool-usage
+    event: PostToolUse
+    type: command
+    matcher: "*"
+    timeout: 30
+    failMode: allow
+    script: |
+      #!/usr/bin/env python3
+      import sys, json
+      context = json.load(sys.stdin)
+      tool = context.get("tool_name", "unknown")
+      print(json.dumps({
+          "decision": "allow",
+          "hookSpecificOutput": {"additionalContext": f"[AUDIT] Tool '{tool}' was executed."}
+      }))
+
+  # Block dangerous command patterns regardless of gate policy.
+  - name: block-dangerous-commands
+    event: PostToolUse
+    type: command
+    matcher: "restart_.*|adjust_.*|.*_deployment"
+    timeout: 30
+    failMode: allow
+    script: |
+      #!/usr/bin/env python3
+      import sys, json, re
+      context = json.load(sys.stdin)
+      command = context.get("tool_input", {}).get("command", "")
+      dangerous = [r"\brm\s+-rf\b", r"\bsudo\b", r"\bchmod\s+777\b", r"--force\b.*delete"]
+      for pattern in dangerous:
+          if re.search(pattern, command):
+              print(json.dumps({"decision": "block", "reason": f"Blocked dangerous pattern: {pattern}"}))
+              sys.exit(0)
+      print(json.dumps({"decision": "allow"}))
+
+  # Validate resolution completeness before the agent finalizes.
+  - name: resolution-completeness
+    event: Stop
+    type: prompt
+    timeout: 30
+    maxRejections: 3
+    prompt: |
+      Review the agent's final incident summary below. It must state a root
+      cause and what was done about it. $ARGUMENTS
+
+  # Lifecycle: announce the start of every investigation.
+  - name: announce-investigation
+    event: investigation_started
+    type: command
+    timeout: 15
+    command: >
+      echo '{"decision": "allow"}'
+
+  # Lifecycle: LLM safety review of the mitigation plan before execution.
+  - name: change-freeze-check
+    event: before_mitigation
+    type: prompt
+    timeout: 30
+    prompt: |
+      Evaluate whether the proposed mitigation plan is safe to execute now.
+      Consider blast radius, reversibility, and whether root-cause confidence
+      justifies action. Reject plans that delete data or have no rollback
+      path in production. $ARGUMENTS
+
+  # Lifecycle: page the on-call channel when the agent escalates.
+  - name: page-oncall-on-escalation
+    event: on_escalation
+    type: command
+    timeout: 15
+    command: >
+      echo '{"decision": "allow", "hookSpecificOutput": {"additionalContext": "on-call notified"}}'

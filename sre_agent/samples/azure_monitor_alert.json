@@ -1,0 +1,26 @@
+{
+  "schemaId": "azureMonitorCommonAlertSchema",
+  "data": {
+    "essentials": {
+      "alertId": "/subscriptions/0000/providers/Microsoft.AlertsManagement/alerts/abc123",
+      "alertRule": "payment-service memory usage critical",
+      "severity": "Sev2",
+      "signalType": "Metric",
+      "monitorCondition": "Fired",
+      "description": "Memory working set exceeded 90% of limit on payment-service for 15 minutes; pods restarting with OOMKilled.",
+      "firedDateTime": "2026-07-03T02:47:00Z",
+      "alertTargetIDs": [
+        "/subscriptions/0000/resourceGroups/prod-payments-rg/providers/Microsoft.ContainerService/managedClusters/prod-aks/payment-service"
+      ]
+    },
+    "alertContext": {
+      "condition": {
+        "metricName": "MemoryWorkingSet",
+        "metricValue": 92.4,
+        "threshold": 90,
+        "operator": "GreaterThan",
+        "windowSize": "PT15M"
+      }
+    }
+  }
+}
