@@ -139,14 +139,51 @@ def test_new_record_id_prefix():
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.unit
-def test_search_without_embedder_returns_empty(monkeypatch):
+def test_hybrid_degrades_to_keyword_without_embedder(monkeypatch):
+    """With hybrid on (default), no embedder still returns keyword matches."""
     embeddings.reset_for_tests()
     monkeypatch.setattr(embeddings, "get_embedder", lambda: None)
-    store = VectorKnowledgeStore(InMemoryVectorIndex())
-    # save still mirrors nothing (no mirror path) and doesn't raise.
+    store = VectorKnowledgeStore(InMemoryVectorIndex(), hybrid=True)
+    store.save(_record("1", "payment memory leak OOM"))
+    matches = store.search("memory oom")
+    assert matches and matches[0].record_id == "1"  # keyword arm carried it
+    embeddings.reset_for_tests()
+
+
+@pytest.mark.unit
+def test_pure_vector_without_embedder_returns_empty(monkeypatch):
+    """With hybrid disabled, no embedder -> no matches."""
+    embeddings.reset_for_tests()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda: None)
+    store = VectorKnowledgeStore(InMemoryVectorIndex(), hybrid=False)
     store.save(_record("1", "payment memory leak"))
     assert store.search("memory") == []
     embeddings.reset_for_tests()
+
+
+@pytest.mark.unit
+def test_hybrid_matches_exact_identifier_vector_would_miss(fake_embedder):
+    """Error codes / job names outside the embedding vocab still match via
+    the keyword arm — the whole point of hybrid for SRE."""
+    store = VectorKnowledgeStore(InMemoryVectorIndex(), hybrid=True)
+    # "S0C7" and "NIGHTLY_SETTLEMENT_LOAD" are not in the fake embed vocab,
+    # so the vector arm cannot distinguish these records.
+    store.save(_record("1", "batch abend S0C7 on NIGHTLY_SETTLEMENT_LOAD",
+                       service="batch", root_cause="data exception"))
+    store.save(_record("2", "orders latency cpu", service="orders"))
+
+    matches = store.search("S0C7 abend")
+    assert matches[0].record_id == "1"  # exact identifier match wins
+
+
+@pytest.mark.unit
+def test_rrf_fusion_prefers_agreement(fake_embedder):
+    """A record that both arms rank should beat one only a single arm ranks."""
+    store = VectorKnowledgeStore(InMemoryVectorIndex(), hybrid=True)
+    store.save(_record("both", "payment memory oom leak restart"))
+    store.save(_record("kwonly", "memory disk widget zzz", service="other"))
+    matches = store.search("payment memory oom restart", service_name="payment-service")
+    assert matches[0].record_id == "both"
 
 
 @pytest.mark.unit

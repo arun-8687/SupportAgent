@@ -522,11 +522,21 @@ Embeddings come from Azure OpenAI (`SRE_AGENT_AZURE_OPENAI_EMBEDDING_DEPLOYMENT`
 or OpenAI (`SRE_AGENT_OPENAI_EMBEDDING_MODEL`); without either, the agent
 stays on the keyword backend — no configuration means no behavior change.
 The `VectorKnowledgeStore` is a drop-in for the keyword store (same
-`save`/`search`/`load_all`), so nothing downstream changes. A query that
-can't be embedded returns no vector matches (logged) rather than failing an
-investigation, and a record that can't be embedded on save is still
-mirrored so it is never lost. The `pgvector` package and a
-pgvector-enabled Postgres are required only for that backend.
+`save`/`search`/`load_all`), so nothing downstream changes.
+
+**Hybrid by default** (`SRE_AGENT_KNOWLEDGE_HYBRID_SEARCH`, default on): each
+search fuses a **semantic** arm (embedding cosine) with an **exact-keyword**
+arm using Reciprocal Rank Fusion — so error codes and job names (`S0C7`,
+`NIGHTLY_SETTLEMENT_LOAD`) match exactly while symptoms match semantically,
+covering the identifiers pure embeddings blur. The keyword arm also means
+retrieval keeps working when embeddings are momentarily unavailable (a
+record that can't be embedded on save stays keyword-searchable, never lost).
+
+The pgvector backend uses an **HNSW** cosine index (builds incrementally —
+no IVFFlat train-on-empty problem) plus a GIN full-text index (`simple`
+config, no stemming, so identifiers survive) for the keyword arm. The
+`pgvector` package and a pgvector-enabled Postgres are required only for
+that backend.
 
 ---
 
@@ -622,6 +632,7 @@ All settings via environment variables with prefix `SRE_AGENT_` (see
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` | — | LLM (heuristics used when unset, dev only) |
 | `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` / `OPENAI_EMBEDDING_MODEL` / `EMBEDDING_DIM` | — / `text-embedding-3-small` / `1536` | embeddings for semantic retrieval; unset ⇒ keyword backend |
 | `KNOWLEDGE_VECTOR_BACKEND` | `auto` | `auto` \| `pgvector` \| `memory` \| `file` — incident retrieval backend |
+| `KNOWLEDGE_HYBRID_SEARCH` | `true` | fuse semantic + exact-keyword arms (RRF) so identifiers match exactly |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | — / `gpt-4o-mini` | non-Azure OpenAI alternative |
 | `AUTONOMOUS_MODE` | `false` | gate may auto-allow low-risk unmatched actions (never in prod) |
 | `DRY_RUN` | `true` | render + log skill commands instead of executing |

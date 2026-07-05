@@ -53,6 +53,11 @@ class SREAgentSettings(BaseSettings):
     # when embeddings alone; else the file/keyword store. Force with
     # "pgvector" | "memory" | "file".
     knowledge_vector_backend: str = "auto"
+    # Hybrid retrieval fuses semantic (vector) with exact-keyword matching
+    # so error codes and job names (e.g. "S0C7", "NIGHTLY_SETTLEMENT_LOAD")
+    # match exactly while symptoms match semantically. Also means retrieval
+    # still works when embeddings are momentarily unavailable.
+    knowledge_hybrid_search: bool = True
 
     # --- Execution behavior ---
     # Reviewed mode (default): every mitigation needs approval unless the

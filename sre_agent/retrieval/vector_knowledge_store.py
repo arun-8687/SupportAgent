@@ -45,18 +45,39 @@ def _record_text(record: KnowledgeRecord) -> str:
 
 
 class VectorKnowledgeStore:
-    """Semantic incident knowledge store over a VectorIndex + embedder."""
+    """Semantic incident knowledge store over a VectorIndex + embedder.
 
-    def __init__(self, index: VectorIndex, mirror_path: Optional[Path] = None) -> None:
+    Retrieval is hybrid by default: the semantic (vector) arm and the
+    exact-keyword arm are fused with Reciprocal Rank Fusion so error codes
+    and job names match exactly while symptoms match semantically — and so
+    retrieval still works when embeddings are momentarily unavailable.
+    """
+
+    # RRF constant; 60 is the widely-used default. Rank-based fusion needs
+    # no score normalization between cosine and keyword scales.
+    RRF_K = 60
+
+    def __init__(
+        self,
+        index: VectorIndex,
+        mirror_path: Optional[Path] = None,
+        hybrid: Optional[bool] = None,
+    ) -> None:
         self.index = index
         self.mirror_path = mirror_path
+        self.hybrid = get_settings().knowledge_hybrid_search if hybrid is None else hybrid
         if self.mirror_path is not None:
             self._rehydrate()
 
     def save(self, record: KnowledgeRecord) -> KnowledgeRecord:
-        vector = embeddings.embed_query_sync(_record_text(record))
+        text = _record_text(record)
+        vector = embeddings.embed_query_sync(text)
         if vector is not None:
-            self.index.add(record.record_id, vector, record.model_dump(mode="json"))
+            self.index.add(record.record_id, vector, record.model_dump(mode="json"), text=text)
+        elif self.hybrid:
+            # No embedding, but the keyword arm still needs the record —
+            # index with a NULL vector so it stays keyword-searchable.
+            self.index.add(record.record_id, None, record.model_dump(mode="json"), text=text)
         else:
             logger.warning(
                 "Could not embed knowledge record %s; mirrored only", record.record_id
@@ -70,11 +91,37 @@ class VectorKnowledgeStore:
         self, query: str, service_name: Optional[str] = None, top_k: int = 3
     ) -> List[KnowledgeMatch]:
         vector = embeddings.embed_query_sync(query)
-        if vector is None:
-            logger.warning("Query embedding unavailable; no vector matches")
-            return []
-        hits = self.index.query(vector, top_k=top_k, service_name=service_name)
-        return [self._to_match(h.payload, h.score) for h in hits]
+        vector_hits = (
+            self.index.query(vector, top_k=top_k, service_name=service_name)
+            if vector
+            else []
+        )
+        if not self.hybrid:
+            if vector is None:
+                logger.warning("Query embedding unavailable; no vector matches")
+            return [self._to_match(h.payload, h.score) for h in vector_hits]
+
+        keyword_hits = self.index.keyword_query(
+            query, top_k=top_k, service_name=service_name
+        )
+        fused = self._rrf_fuse(vector_hits, keyword_hits, top_k)
+        return [self._to_match(payload, score) for payload, score in fused]
+
+    def _rrf_fuse(self, vector_hits, keyword_hits, top_k):
+        """Reciprocal Rank Fusion of the two arms.
+
+        Ordering is by fused rank (robust across score scales); the score
+        reported on each match is the best interpretable relevance (cosine
+        or keyword) from whichever arm ranked it, not the raw RRF value.
+        """
+        fused: dict = {}  # id -> [rrf, best_score, payload]
+        for hits in (vector_hits, keyword_hits):
+            for rank, hit in enumerate(hits, start=1):
+                entry = fused.setdefault(hit.id, [0.0, 0.0, hit.payload])
+                entry[0] += 1.0 / (self.RRF_K + rank)
+                entry[1] = max(entry[1], hit.score)
+        ordered = sorted(fused.values(), key=lambda e: e[0], reverse=True)
+        return [(payload, best) for _rrf, best, payload in ordered[:top_k]]
 
     def load_all(self) -> List[KnowledgeRecord]:
         records = []
@@ -121,12 +168,16 @@ class VectorKnowledgeStore:
                 continue
         if not records:
             return
-        vectors = embeddings.embed_texts_sync([_record_text(r) for r in records])
+        texts = [_record_text(r) for r in records]
+        vectors = embeddings.embed_texts_sync(texts)
         if vectors is None:
-            logger.warning("Rehydrate skipped: embeddings unavailable at startup")
-            return
-        for record, vector in zip(records, vectors):
-            self.index.add(record.record_id, vector, record.model_dump(mode="json"))
+            if not self.hybrid:
+                logger.warning("Rehydrate skipped: embeddings unavailable at startup")
+                return
+            # Hybrid: still re-index for the keyword arm (NULL vectors).
+            vectors = [None] * len(records)
+        for record, vector, text in zip(records, vectors, texts):
+            self.index.add(record.record_id, vector, record.model_dump(mode="json"), text=text)
         logger.info("Rehydrated %d knowledge records into vector index", len(records))
 
 
