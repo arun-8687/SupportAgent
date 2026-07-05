@@ -506,6 +506,28 @@ pitfalls to avoid), appends it to the insight log, and merges it into the
 right topic file — so knowledge compounds whether or not the automation
 succeeded.
 
+### Semantic retrieval (pgvector)
+
+Past-incident retrieval — the highest-growth, most-searched source — has a
+pluggable backend selected by `SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND`:
+
+| Backend | When | Notes |
+| --- | --- | --- |
+| `file` (keyword) | default / offline / no embeddings | O(n) token-overlap scan; fine to low thousands of records |
+| `memory` (vector) | embeddings configured, single instance | in-process cosine; records mirrored to JSONL and re-indexed at startup |
+| `pgvector` | embeddings + `DATABASE_URL` | durable, IVFFlat cosine index; the answer to the 40k/day O(n) cliff |
+| `auto` (default) | — | pgvector when DB+embeddings, else memory when embeddings, else file |
+
+Embeddings come from Azure OpenAI (`SRE_AGENT_AZURE_OPENAI_EMBEDDING_DEPLOYMENT`)
+or OpenAI (`SRE_AGENT_OPENAI_EMBEDDING_MODEL`); without either, the agent
+stays on the keyword backend — no configuration means no behavior change.
+The `VectorKnowledgeStore` is a drop-in for the keyword store (same
+`save`/`search`/`load_all`), so nothing downstream changes. A query that
+can't be embedded returns no vector matches (logged) rather than failing an
+investigation, and a record that can't be embedded on save is still
+mirrored so it is never lost. The `pgvector` package and a
+pgvector-enabled Postgres are required only for that backend.
+
 ---
 
 ## Event contracts
@@ -598,6 +620,8 @@ All settings via environment variables with prefix `SRE_AGENT_` (see
 | `SERVICEBUS_TOPIC` / `SERVICEBUS_SUBSCRIPTION` | `sre-incidents` / `sre-agent` | inbound topic/subscription |
 | `SERVICEBUS_OUTBOUND_TOPIC` | `sre-agent-events` | outcomes + runner dispatch |
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` | — | LLM (heuristics used when unset, dev only) |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` / `OPENAI_EMBEDDING_MODEL` / `EMBEDDING_DIM` | — / `text-embedding-3-small` / `1536` | embeddings for semantic retrieval; unset ⇒ keyword backend |
+| `KNOWLEDGE_VECTOR_BACKEND` | `auto` | `auto` \| `pgvector` \| `memory` \| `file` — incident retrieval backend |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | — / `gpt-4o-mini` | non-Azure OpenAI alternative |
 | `AUTONOMOUS_MODE` | `false` | gate may auto-allow low-risk unmatched actions (never in prod) |
 | `DRY_RUN` | `true` | render + log skill commands instead of executing |
@@ -662,7 +686,11 @@ sre_agent/
 │   ├── synthesized.py         # overview.md + topic markdown files
 │   ├── knowledge_base.py      # uploaded docs
 │   ├── user_memories.py       # #remember / #retrieve / #forget
-│   └── knowledge_store.py     # past incidents
+│   └── knowledge_store.py     # past incidents (keyword backend)
+├── retrieval/
+│   ├── embeddings.py          # embedder accessor (graceful when unset)
+│   ├── vector_index.py        # InMemoryVectorIndex + PgVectorIndex
+│   └── vector_knowledge_store.py  # semantic incident store + factory
 ├── tools/
 │   ├── observability.py / deployments.py / ticketing.py
 ├── mcp/
@@ -741,8 +769,12 @@ Files, Easy Auth) see **[deploy/README.md](deploy/README.md)**.
 - **Dispatch mode weakens immediate verification**: execution results come
   back as "dispatched"; verification should consume the runner's completion
   events (runner not included in this package).
-- **Keyword-based retrieval**: memory search is keyword-overlap; swap in
-  pgvector / Azure AI Search for semantic recall at scale.
+- **Retrieval backends**: incident knowledge retrieval is pluggable —
+  keyword-overlap (default, offline), an in-memory vector index (semantic,
+  single-instance), or **pgvector** (semantic, durable, scales past the
+  O(n) keyword scan). See "Semantic retrieval" below; the other memory
+  sources (user memories, uploaded docs, synthesized notes) remain
+  keyword-based and can be migrated the same way.
 - **File locks are advisory**: fine on local disk and NFS; unreliable on SMB
   mounts — prefer the Postgres-backed stores (automatic when
   `DATABASE_URL` is set).

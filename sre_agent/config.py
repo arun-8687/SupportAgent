@@ -43,6 +43,17 @@ class SREAgentSettings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
 
+    # --- Embeddings / semantic retrieval ---
+    # When configured (embedding deployment/model reachable), incident
+    # knowledge retrieval uses a vector backend instead of keyword overlap.
+    azure_openai_embedding_deployment: Optional[str] = None
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1536  # text-embedding-3-small=1536, 3-large=3072
+    # auto: pgvector when DATABASE_URL + embeddings; else in-memory vector
+    # when embeddings alone; else the file/keyword store. Force with
+    # "pgvector" | "memory" | "file".
+    knowledge_vector_backend: str = "auto"
+
     # --- Execution behavior ---
     # Reviewed mode (default): every mitigation needs approval unless the
     # permission gate explicitly allows it. Autonomous mode lets the gate
@@ -150,6 +161,15 @@ class SREAgentSettings(BaseSettings):
         if self.approval_require_verified_identity is not None:
             return self.approval_require_verified_identity
         return self.is_production
+
+    @property
+    def embeddings_configured(self) -> bool:
+        """Whether an embedding model is available for semantic retrieval."""
+        return bool(
+            (self.azure_openai_endpoint and self.azure_openai_api_key
+             and self.azure_openai_embedding_deployment)
+            or self.openai_api_key
+        )
 
 
 @lru_cache

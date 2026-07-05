@@ -26,6 +26,11 @@ httpx>=0.26.0
 # azure-monitor-opentelemetry>=1.6.0    # export step logs/spans to App Insights
 #                                       # (enabled by APPLICATIONINSIGHTS_CONNECTION_STRING)
 
+# Semantic knowledge retrieval (pgvector backend). Embeddings use the
+# langchain-openai dep already listed above; pgvector needs psycopg (from
+# langgraph-checkpoint-postgres) plus the pgvector adapter:
+# pgvector>=0.3.0   # required when SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND=pgvector
+
 # Optional extras
 # langchain-mcp-adapters>=0.1.0   # enable MCP connectors (sre_agent/mcp)
 

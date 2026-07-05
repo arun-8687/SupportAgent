@@ -126,12 +126,24 @@ az postgres flexible-server create \
 az postgres flexible-server db create \
   --resource-group "$RG" --server-name "$PG_SERVER" --database-name "$PG_DB"
 
+# Enable the pgvector extension for semantic knowledge retrieval.
+az postgres flexible-server parameter set \
+  --resource-group "$RG" --server-name "$PG_SERVER" \
+  --name azure.extensions --value vector
+# The agent runs `CREATE EXTENSION IF NOT EXISTS vector` itself on first use;
+# the allowlist above is what lets that succeed on Azure Flexible Server.
+
 export DATABASE_URL="postgresql://${PG_ADMIN}:${PG_PASSWORD}@${PG_SERVER}.postgres.database.azure.com:5432/${PG_DB}?sslmode=require"
 ```
 
 > Sizing: B1ms is fine to start. Watch connection counts as you scale out —
 > each instance opens checkpointer connections; add PgBouncer (built into
 > Flexible Server as the `pgbouncer` feature) if you exceed ~50 connections.
+>
+> Semantic retrieval: set `SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND=pgvector` and
+> the `SRE_AGENT_AZURE_OPENAI_EMBEDDING_DEPLOYMENT` app setting. The agent
+> creates the vector table + IVFFlat index on first write. This is the fix
+> for the O(n) keyword-scan cliff at high incident volume.
 
 ## 4. Storage account + Azure Files share
 
@@ -262,6 +274,8 @@ cp sre_agent/requirements.txt build/functionapp/requirements.txt
 # production needs the Postgres checkpointer + App Insights exporter:
 echo "langgraph-checkpoint-postgres>=2.0.0" >> build/functionapp/requirements.txt
 echo "azure-monitor-opentelemetry>=1.6.0" >> build/functionapp/requirements.txt
+# semantic knowledge retrieval (SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND=pgvector):
+echo "pgvector>=0.3.0" >> build/functionapp/requirements.txt
 cp -r sre_agent build/functionapp/sre_agent
 cat > build/functionapp/function_app.py <<'EOF'
 """Azure Functions entry point: re-export the app from the package."""

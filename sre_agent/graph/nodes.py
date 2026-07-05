@@ -87,7 +87,13 @@ class SREAgentNodes:
         self.subagents = subagents or SubagentRegistry(skills=self.skills)
         self.gate = gate or PermissionGate()
         self.hooks = hooks or HookEngine()
-        self.knowledge = knowledge or KnowledgeStore()
+        if knowledge is None:
+            from sre_agent.retrieval.vector_knowledge_store import (
+                create_incident_knowledge_store,
+            )
+
+            knowledge = create_incident_knowledge_store()
+        self.knowledge = knowledge
         self.known_errors = known_errors or KnownErrorStore()
         # Unified memory: past incidents + user memories + knowledge base +
         # synthesized markdown files, all searched together.

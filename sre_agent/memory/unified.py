@@ -40,7 +40,13 @@ class AgentMemory:
         synthesized: Optional[SynthesizedKnowledge] = None,
         insights_path: Optional[Path] = None,
     ) -> None:
-        self.incidents = incidents or KnowledgeStore()
+        if incidents is None:
+            from sre_agent.retrieval.vector_knowledge_store import (
+                create_incident_knowledge_store,
+            )
+
+            incidents = create_incident_knowledge_store()
+        self.incidents = incidents
         self.user_memories = user_memories or UserMemoryStore()
         self.knowledge_base = knowledge_base or KnowledgeBase()
         self.synthesized = synthesized or SynthesizedKnowledge()
