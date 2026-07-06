@@ -49,6 +49,7 @@ class ServiceBusTopicListener:
         self.service = service or SREAgentService()
         self._stopping = asyncio.Event()
         self._last_sweep = 0.0
+        self._step_writer = None
 
     async def run(self) -> None:
         """Receive loop with fast-ack, dead-lettering, and periodic sweeps."""
@@ -58,6 +59,11 @@ class ServiceBusTopicListener:
                 "use `python -m sre_agent.main simulate <alert.json>` for local runs."
             )
 
+        # Persist the step timeline for the monitoring UI: the writer registers
+        # a non-blocking sink and drains it in batches. Off by default; drained
+        # on shutdown so no queued events are lost.
+        await self._start_step_writer()
+
         from azure.servicebus.aio import ServiceBusClient
 
         logger.info(
@@ -65,22 +71,39 @@ class ServiceBusTopicListener:
             self.settings.servicebus_topic,
             self.settings.servicebus_subscription,
         )
-        async with ServiceBusClient.from_connection_string(
-            self.settings.servicebus_connection_string
-        ) as client:
-            receiver = client.get_subscription_receiver(
-                topic_name=self.settings.servicebus_topic,
-                subscription_name=self.settings.servicebus_subscription,
-                max_wait_time=30,
-            )
-            async with receiver:
-                while not self._stopping.is_set():
-                    messages = await receiver.receive_messages(
-                        max_message_count=5, max_wait_time=30
-                    )
-                    for message in messages:
-                        await self._handle_message(receiver, message)
-                    await self._maybe_sweep()
+        try:
+            async with ServiceBusClient.from_connection_string(
+                self.settings.servicebus_connection_string
+            ) as client:
+                receiver = client.get_subscription_receiver(
+                    topic_name=self.settings.servicebus_topic,
+                    subscription_name=self.settings.servicebus_subscription,
+                    max_wait_time=30,
+                )
+                async with receiver:
+                    while not self._stopping.is_set():
+                        messages = await receiver.receive_messages(
+                            max_message_count=5, max_wait_time=30
+                        )
+                        for message in messages:
+                            await self._handle_message(receiver, message)
+                        await self._maybe_sweep()
+        finally:
+            await self._stop_step_writer()
+
+    async def _start_step_writer(self) -> None:
+        if not self.settings.persist_step_events:
+            return
+        from sre_agent.step_events import create_step_event_store
+        from sre_agent.step_writer import StepEventWriter
+
+        self._step_writer = StepEventWriter(create_step_event_store())
+        self._step_writer.start()
+
+    async def _stop_step_writer(self) -> None:
+        if self._step_writer is not None:
+            await self._step_writer.stop()
+            self._step_writer = None
 
     def stop(self) -> None:
         self._stopping.set()
@@ -178,6 +201,11 @@ class ServiceBusTopicListener:
             recovered = await self.service.recover_stalled_intakes()
             if recovered:
                 logger.warning("Sweeper recovered %d stalled intakes", len(recovered))
+            from sre_agent.maintenance import run_maintenance
+
+            summary = run_maintenance()
+            if any(summary.values()):
+                logger.info("Maintenance: %s", summary)
         except Exception:
             logger.exception("Sweep failed")
 

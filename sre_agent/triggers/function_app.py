@@ -32,6 +32,7 @@ configure_telemetry()  # export step logs/spans to App Insights from startup
 app = func.FunctionApp()
 
 _service: SREAgentService | None = None
+_step_writer = None
 
 
 def get_service() -> SREAgentService:
@@ -39,6 +40,24 @@ def get_service() -> SREAgentService:
     if _service is None:
         _service = SREAgentService()
     return _service
+
+
+async def ensure_step_writer() -> None:
+    """Start the durable step-event writer once, on the live event loop.
+
+    Started lazily from the first async trigger invocation (not module load)
+    so `asyncio.create_task` has a running loop. The Functions host keeps the
+    async worker process and its loop alive across invocations, so the
+    background drain persists between calls.
+    """
+    global _step_writer
+    if _step_writer is not None or not get_settings().persist_step_events:
+        return
+    from sre_agent.step_events import create_step_event_store
+    from sre_agent.step_writer import StepEventWriter
+
+    _step_writer = StepEventWriter(create_step_event_store())
+    _step_writer.start()
 
 
 @app.function_name("OnIncidentAlert")
@@ -61,6 +80,7 @@ async def on_incident_alert(message: func.ServiceBusMessage) -> None:
     props = message.application_properties or {}
     source_hint = str(props.get("source", ""))
 
+    await ensure_step_writer()
     service = get_service()
     if str(props.get("event_type", "alert")) == "approval":
         result = await service.submit_approval(
@@ -157,8 +177,8 @@ async def approval_sweep(timer: func.TimerRequest) -> None:
     if recovered:
         logging.warning("Sweeper recovered %d stalled intakes", len(recovered))
 
-    from sre_agent.maintenance import prune_checkpoints
+    from sre_agent.maintenance import run_maintenance
 
-    pruned = prune_checkpoints()
-    if pruned:
-        logging.info("Pruned %d expired checkpoint rows", pruned)
+    summary = run_maintenance()
+    if any(summary.values()):
+        logging.info("Maintenance: %s", summary)

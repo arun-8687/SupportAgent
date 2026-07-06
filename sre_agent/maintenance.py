@@ -1,5 +1,5 @@
 """
-Operational maintenance: checkpoint retention.
+Operational maintenance: checkpoint + step-event retention.
 
 LangGraph writes a checkpoint per superstep, and each one carries the
 full incident state (raw alert payload, all evidence). Without retention
@@ -7,6 +7,12 @@ the checkpoint tables grow unbounded. Finished threads older than
 SRE_AGENT_CHECKPOINT_RETENTION_DAYS are pruned; a thread that is still
 paused for approval is protected by the pending-approvals registry
 (sweep it first — the sweeper escalates and unregisters it).
+
+The durable step-event table is the highest-volume object (one row per
+workflow step, at 40k jobs/day). It is time-partitioned by month, so
+retention is a partition DROP — instant, no index churn — rather than a
+mass DELETE. `prune_step_events` drops partitions entirely older than
+SRE_AGENT_STEP_EVENT_RETENTION_DAYS.
 """
 import logging
 
@@ -67,3 +73,40 @@ def prune_checkpoints(retention_days: int | None = None) -> int:
     except Exception:
         logger.exception("Checkpoint pruning failed")
     return deleted
+
+
+def prune_step_events(retention_days: int | None = None) -> int:
+    """Drop step-event partitions entirely older than the retention window.
+
+    No-op (returns 0) without a Postgres step-event backend. Cheap: a
+    partition DROP releases the storage at once, unlike a row DELETE.
+    """
+    settings = get_settings()
+    if not settings.database_url:
+        return 0
+    retention_days = retention_days or settings.step_event_retention_days
+    try:
+        from sre_agent.step_events import PostgresStepEventStore
+
+        store = PostgresStepEventStore(settings.database_url)
+        dropped = store.drop_partitions_older_than(retention_days)
+        if dropped:
+            logger.info("Dropped %d expired step-event partition(s)", dropped)
+        return dropped
+    except ImportError:
+        logger.warning("psycopg not installed; skipping step-event pruning")
+        return 0
+    except Exception:
+        logger.exception("Step-event partition pruning failed")
+        return 0
+
+
+def run_maintenance() -> dict:
+    """Run all retention tasks; safe to call from the sweep timer.
+
+    Returns a summary so the caller can log a single line.
+    """
+    return {
+        "checkpoints_pruned": prune_checkpoints(),
+        "step_event_partitions_dropped": prune_step_events(),
+    }

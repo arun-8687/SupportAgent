@@ -423,7 +423,83 @@ messages (or add a small HTTP front if you want the REST endpoint).
 
 ---
 
-## 13. Operations
+## 13. Monitoring & action web UI (App Service)
+
+The console (`sre_agent/webapi` + `frontend/`) is a **separate** always-on App
+Service that reads the same Postgres the worker writes and serves the built
+React SPA. It never runs the workflow — it only lists incidents, streams the
+live step timeline, and approves/rejects paused mitigations.
+
+**Prereq — turn on durable step events on the worker** so the timeline exists:
+
+```bash
+# On the Function App (or listener) from steps 6/12, add:
+az functionapp config appsettings set --resource-group "$RG" --name "$APP" \
+  --settings SRE_AGENT_PERSIST_STEP_EVENTS=true
+```
+
+**Build the SPA** and ship it with the API:
+
+```bash
+cd frontend && npm ci && npm run build   # -> frontend/dist
+```
+
+**Create the API App Service** (Always On so SSE stays connected):
+
+```bash
+az appservice plan create --resource-group "$RG" --name plan-sre-api \
+  --sku B2 --is-linux true
+az webapp create --resource-group "$RG" --plan plan-sre-api \
+  --name "${APP}-api" --runtime "PYTHON:3.11"
+
+az webapp config appsettings set --resource-group "$RG" --name "${APP}-api" \
+  --settings \
+  SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+  SRE_AGENT_ENVIRONMENT=production \
+  SRE_AGENT_DATABASE_URL="$DATABASE_URL" \
+  SRE_AGENT_PERSIST_STEP_EVENTS=true \
+  SRE_AGENT_STEP_EVENT_RETENTION_DAYS=30 \
+  SRE_AGENT_WEBAPI_SPA_DIST_DIR="/home/site/wwwroot/frontend/dist" \
+  APPLICATIONINSIGHTS_CONNECTION_STRING="$APPINSIGHTS_CONNECTION_STRING"
+
+az webapp config set --resource-group "$RG" --name "${APP}-api" \
+  --startup-file "uvicorn sre_agent.webapi.main:app --host 0.0.0.0 --port 8000" \
+  --always-on true
+
+# Health/readiness probes
+az webapp config set --resource-group "$RG" --name "${APP}-api" \
+  --generic-configurations '{"healthCheckPath": "/healthz"}'
+
+# Deploy the code WITH the built SPA
+zip -r /tmp/sre-api.zip sre_agent frontend/dist requirements.txt
+az webapp deploy --resource-group "$RG" --name "${APP}-api" \
+  --src-path /tmp/sre-api.zip --type zip
+```
+
+**Easy Auth + the two app roles.** Reuse the registration pattern from §9,
+but define **app roles** on the API's app registration and assign them to AD
+groups:
+
+```bash
+# In the API app registration, add appRoles "SRE.Viewer" and "SRE.Approver"
+# (value = role name), then assign:
+#   SRE.Viewer   -> the on-call / L1 group   (read the console)
+#   SRE.Approver -> the senior SRE group      (approve/reject mitigations)
+```
+
+Reads require `SRE.Viewer`; `POST …/approval` requires `SRE.Approver`. The API
+enforces this in production (`SRE_AGENT_ENVIRONMENT=production`), so an
+unauthenticated request is 401 and a viewer attempting to approve is 403. The
+verified Entra identity (`X-MS-CLIENT-PRINCIPAL`) becomes the recorded
+approver — client-supplied names are never trusted.
+
+**Retention.** The worker's `ApprovalSweep` timer now also drops
+`sre_step_events` partitions older than `SRE_AGENT_STEP_EVENT_RETENTION_DAYS`
+(a partition DROP, not a mass delete) alongside checkpoint pruning.
+
+---
+
+## 14. Operations
 
 | Task | How |
 | --- | --- |
@@ -431,23 +507,26 @@ messages (or add a small HTTP front if you want the REST endpoint).
 | Inspect dead-lettered alerts | `az servicebus topic subscription show --resource-group $RG --namespace-name $SB_NAMESPACE --topic-name $TOPIC_IN --name $SB_SUB --query countDetails` then Service Bus Explorer (portal) on the DLQ |
 | Timed-out approvals | escalated automatically by the `ApprovalSweep` timer (every 5 min); look for "Sweeper escalated" traces |
 | Checkpoint growth | pruned by the same timer past `SRE_AGENT_CHECKPOINT_RETENTION_DAYS`; verify with `SELECT count(*) FROM checkpoints;` |
+| Step-event growth | the console's timeline table; the sweep drops monthly partitions past `SRE_AGENT_STEP_EVENT_RETENTION_DAYS`; verify with `SELECT count(*) FROM sre_step_events;` |
+| Watch/act in the UI | the `${APP}-api` App Service console (§13): dashboard, live timeline, approval queue |
 | Knowledge review | files on the share: `az storage file list --account-name $STORAGE --share-name $FILESHARE --path memories/synthesizedKnowledge -o table` |
 | Rotate secrets | Key Vault references + `az functionapp restart` |
 | Scale ceiling | `az functionapp plan update --max-burst`; raise `SRE_AGENT_LLM_MAX_CONCURRENCY` and Azure OpenAI capacity together |
 
-## 14. Going live checklist
+## 15. Going live checklist
 
 - [ ] `SRE_AGENT_ENVIRONMENT=production` (strict mode verified: deploy fails fast if Postgres is missing)
 - [ ] Secrets in Key Vault, not raw app settings
 - [ ] Gate policy (`gate/policies.yaml`) reviewed by the team that owns prod
 - [ ] `response_plan.md` filled in with your escalation procedure
 - [ ] Runbooks uploaded to the knowledge base directory on the share
-- [ ] Easy Auth enforced and an approval smoke-tested end-to-end
+- [ ] Easy Auth enforced and an approval smoke-tested end-to-end (worker **and** the web console)
+- [ ] `SRE_AGENT_PERSIST_STEP_EVENTS=true` on both the worker and the API; `SRE.Viewer`/`SRE.Approver` roles assigned to the right AD groups
 - [ ] DLQ alert configured (active message count on the subscription's DLQ)
 - [ ] Privileged runner deployed and consuming `execution_request` events **before** flipping `SRE_AGENT_DRY_RUN=false`
 - [ ] Azure OpenAI capacity sized for your worst alert storm (`maxConcurrentCalls × LLM_MAX_CONCURRENCY × instances`)
 
-## 15. Teardown
+## 16. Teardown
 
 ```bash
 az group delete --name "$RG" --yes --no-wait

@@ -597,6 +597,35 @@ every graph node (completed / paused / failed, with durations),
 Insights configured everything degrades to plain local logging — offline
 dev and CI need nothing.
 
+## Monitoring & action console
+
+A standalone web console (`sre_agent/webapi` + `frontend/`) turns the
+headless agent into something an operator watches and acts on. It is a
+separate always-on App Service that reads the **shared Postgres** the worker
+writes — it never runs the workflow.
+
+- **Persistence** the UI needs, all worker-side: an **incident index**
+  (`incident_index.py`) so incidents can be *listed* (the checkpointer is
+  keyed only by `thread_id`), and a durable **step-event timeline**
+  (`step_events.py`, monthly time-partitioned) fed by a **non-blocking**
+  batching writer (`step_writer.py`) — the workflow hot path only enqueues
+  onto a bounded queue (drop-oldest + counter under storm). Enable with
+  `SRE_AGENT_PERSIST_STEP_EVENTS=true`.
+- **API** (`webapi/`, async FastAPI): list/filter/paginate incidents, redacted
+  full-state detail (raw alert payload stripped), per-incident + global **SSE**
+  live streams, approval queue, `POST …/approval`, and a metrics summary.
+  **Entra RBAC**: `SRE.Viewer` reads, `SRE.Approver` approves — enforced in
+  production, closing the previously-open GET status endpoint.
+- **SPA** (`frontend/`, React + Vite + TypeScript): dashboard with a live
+  incident table and approval-queue widget, an incident detail view showing
+  the whole investigation beside a live run timeline, and an approval panel
+  gated on the approver role.
+
+Action scope is deliberately **approve/reject only**; triggering/replaying
+investigations and editing gate policy / known errors stay git-reviewed. See
+`sre_agent/deploy/README.md` §13 for deployment and `frontend/README.md` for
+local dev.
+
 ## Reliability & safety
 
 | Protection | Mechanism |
@@ -614,6 +643,8 @@ dev and CI need nothing.
 | Dangerous commands | permission gate (name/risk/environment policy) + PostToolUse blocker hook + shell-quoted parameters + autonomy never in prod |
 | Missing executables (Functions sandbox) | binary preflight with a clear error; `dispatch` mode hands execution to a privileged runner via the outbound topic |
 | Unbounded checkpoint growth | retention pruning (`checkpoint_retention_days`), pending approvals protected |
+| Unbounded step-event growth | time-partitioned `sre_step_events`; retention is a partition **drop** past `step_event_retention_days`, run by the same sweep |
+| UI event I/O on the hot path | the step sink only enqueues to a bounded queue; a background batch writer drains it (drop-oldest + counter, never blocks the workflow) |
 | Concurrent store writes | advisory file locks (use NFS, not SMB) or Postgres-backed stores when `database_url` is set |
 
 ---
