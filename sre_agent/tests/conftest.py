@@ -15,6 +15,7 @@ from sre_agent.memory.unified import AgentMemory
 from sre_agent.memory.user_memories import UserMemoryStore
 from sre_agent.incident_index import FileIncidentIndexStore
 from sre_agent.service import SREAgentService
+from sre_agent.step_events import FileStepEventStore
 from sre_agent.skills.executor import SkillExecutor
 from sre_agent.skills.registry import SkillRegistry
 from sre_agent.stores import FileAlertLedger, FilePendingApprovalStore
@@ -72,6 +73,11 @@ def pending_approvals(tmp_path) -> FilePendingApprovalStore:
 @pytest.fixture
 def incident_index(tmp_path) -> FileIncidentIndexStore:
     return FileIncidentIndexStore(path=tmp_path / "incident_index.jsonl")
+
+
+@pytest.fixture
+def step_events(tmp_path) -> FileStepEventStore:
+    return FileStepEventStore(path=tmp_path / "step_events.jsonl")
 
 
 @pytest.fixture

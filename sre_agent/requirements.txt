@@ -19,6 +19,12 @@ pyyaml>=6.0.1
 # HTTP (ticketing / deployment correlation)
 httpx>=0.26.0
 
+# Monitoring & action web API (sre_agent/webapi). The standalone App Service
+# reads shared Postgres state and serves the React SPA. psycopg[pool] powers
+# the async read pool and ships with langgraph-checkpoint-postgres below.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
 # Production (required when SRE_AGENT_ENVIRONMENT=production)
 # langgraph-checkpoint-postgres>=2.0.0  # durable checkpointer (brings psycopg,
 #                                       # also used by the alert ledger and
