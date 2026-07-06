@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api, sseUrls } from '../api/client';
-import type { StepEvent } from '../api/types';
+import type { CorrelatedChange, StepEvent } from '../api/types';
 import { SeverityBadge, StatusBadge } from '../components/Badges';
 import { ApprovalPanel } from '../components/ApprovalPanel';
 import { ErrorState, LiveDot, Loading } from '../components/States';
@@ -119,7 +119,7 @@ export function IncidentDetailPage() {
                 {state.root_cause.correlated_change && (
                   <>
                     <dt>Correlated change</dt>
-                    <dd>{state.root_cause.correlated_change}</dd>
+                    <dd>{formatCorrelatedChange(state.root_cause.correlated_change)}</dd>
                   </>
                 )}
               </dl>
@@ -191,4 +191,10 @@ function mergeTimeline(persisted: StepEvent[], live: StepEvent[]): StepEvent[] {
   for (const e of persisted) bySeq.set(e.seq, e);
   for (const e of live) bySeq.set(e.seq, e);
   return Array.from(bySeq.values()).sort((a, b) => a.seq - b.seq);
+}
+
+function formatCorrelatedChange(change: CorrelatedChange): string {
+  const parts = [change.identifier, change.description].filter(Boolean);
+  const label = parts.join(' — ') || change.kind;
+  return change.author ? `${label} (${change.author})` : label;
 }

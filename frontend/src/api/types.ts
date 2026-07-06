@@ -57,6 +57,15 @@ export interface MitigationAction {
   [k: string]: unknown;
 }
 
+export interface CorrelatedChange {
+  kind: 'deployment' | 'commit' | 'config_change';
+  identifier: string;
+  description?: string;
+  occurred_at?: string | null;
+  author?: string | null;
+  repo?: string | null;
+}
+
 export interface GateDecision {
   action_id: string;
   outcome: string;
@@ -78,7 +87,7 @@ export interface IncidentState {
   root_cause?: {
     hypothesis?: string;
     confidence?: number;
-    correlated_change?: string | null;
+    correlated_change?: CorrelatedChange | null;
   };
   mitigation_plan?: { actions?: MitigationAction[]; summary?: string; risk?: string };
   gate_decisions?: GateDecision[];

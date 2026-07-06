@@ -356,13 +356,33 @@ def _last_event_id(request: Request) -> int:
 
 
 def _mount_spa(app: FastAPI, dist_dir: Optional[Path]) -> None:
-    """Serve the built React SPA at / with history-fallback to index.html."""
+    """Serve the built React SPA with history-fallback to index.html.
+
+    `StaticFiles(html=True)` alone only serves index.html for `/` and exact
+    directory paths — a direct/deep-link GET to a client-side route like
+    `/incidents/sre-123` or a hard refresh on `/approvals` 404s, since no
+    such file exists on disk. React Router needs every unmatched GET (i.e.
+    anything that isn't an API route, already registered above and matched
+    first) to fall through to index.html so it can take over client-side.
+    """
     if not dist_dir:
         return
     dist = Path(dist_dir)
     if not dist.is_dir():
         logger.warning("SPA dist dir %s not found; UI not served", dist)
         return
+    from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
 
-    app.mount("/", StaticFiles(directory=str(dist), html=True), name="spa")
+    index_file = dist / "index.html"
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="spa-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # A real file at the SPA root (favicon.ico, manifest.json, ...).
+        candidate = dist / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index_file)

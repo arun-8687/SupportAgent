@@ -205,3 +205,34 @@ def test_approver_header_resolves_paused_incident(client, paused_incident):
                     json={"approved": True, "reason": "looks safe"}, headers=APPROVER)
     assert r.status_code == 200
     assert r.json()["status"] in ("resolved", "verified", "mitigated")
+
+
+# --------------------------------------------------------------------------- #
+# SPA history fallback
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.integration
+def test_spa_deep_link_falls_back_to_index_html(service, incident_index, step_events, tmp_path):
+    """A direct GET to a client-side route (deep link / hard refresh) must
+    serve index.html so React Router can take over, not 404."""
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html><body>spa shell</body></html>")
+
+    from sre_agent.config import get_settings
+
+    settings = get_settings()
+    original = settings.webapi_spa_dist_dir
+    settings.webapi_spa_dist_dir = dist
+    try:
+        app = create_app(service=service, incident_index=incident_index, step_events=step_events)
+    finally:
+        settings.webapi_spa_dist_dir = original
+
+    with TestClient(app) as c:
+        for path in ("/", "/approvals", "/incidents/sre-123"):
+            r = c.get(path)
+            assert r.status_code == 200, path
+            assert "spa shell" in r.text, path
+        # API routes are unaffected by the catch-all.
+        assert c.get("/api/incidents").status_code == 200
