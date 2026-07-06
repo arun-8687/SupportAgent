@@ -134,6 +134,22 @@ class SREAgentSettings(BaseSettings):
     database_url: Optional[str] = None  # Postgres checkpointer when set
     checkpoint_retention_days: int = 14
 
+    # --- Monitoring UI (incident index + step-event timeline) ---
+    # When True, the worker registers a durable step-event sink so the
+    # run timeline is queryable/streamable by the UI. Default off: non-UI
+    # deploys and tests are unaffected.
+    persist_step_events: bool = False
+    step_event_batch_size: int = 100
+    step_event_flush_interval: float = 1.0
+    step_event_queue_max: int = 10000
+    step_event_retention_days: int = 30
+    # --- Web API service ---
+    webapi_host: str = "0.0.0.0"
+    webapi_port: int = 8080
+    webapi_spa_dist_dir: Optional[Path] = None  # built React SPA (StaticFiles)
+    db_pool_min: int = 1
+    db_pool_max: int = 10
+
     # Explicit override for mock/synthetic data fallbacks. Defaults to
     # allowed outside production, forbidden in production.
     allow_mock_data: Optional[bool] = None

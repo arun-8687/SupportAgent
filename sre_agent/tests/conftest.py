@@ -13,6 +13,7 @@ from sre_agent.memory.knowledge_store import KnowledgeStore
 from sre_agent.memory.synthesized import SynthesizedKnowledge
 from sre_agent.memory.unified import AgentMemory
 from sre_agent.memory.user_memories import UserMemoryStore
+from sre_agent.incident_index import FileIncidentIndexStore
 from sre_agent.service import SREAgentService
 from sre_agent.skills.executor import SkillExecutor
 from sre_agent.skills.registry import SkillRegistry
@@ -69,6 +70,11 @@ def pending_approvals(tmp_path) -> FilePendingApprovalStore:
 
 
 @pytest.fixture
+def incident_index(tmp_path) -> FileIncidentIndexStore:
+    return FileIncidentIndexStore(path=tmp_path / "incident_index.jsonl")
+
+
+@pytest.fixture
 def known_errors(tmp_path) -> KnownErrorStore:
     """Known-error store rooted in a temp dir (no repo pollution)."""
     return KnownErrorStore(
@@ -79,7 +85,8 @@ def known_errors(tmp_path) -> KnownErrorStore:
 
 @pytest.fixture
 def service(
-    knowledge_store, agent_memory, skills, hooks, alert_ledger, pending_approvals, known_errors
+    knowledge_store, agent_memory, skills, hooks, alert_ledger, pending_approvals,
+    known_errors, incident_index,
 ) -> SREAgentService:
     """Full workflow wired with dry-run executor and temp stores."""
     nodes = SREAgentNodes(
@@ -95,6 +102,7 @@ def service(
         nodes=nodes,
         alert_ledger=alert_ledger,
         pending_approvals=pending_approvals,
+        incident_index=incident_index,
     )
 
 

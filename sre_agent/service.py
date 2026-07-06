@@ -26,6 +26,7 @@ from sre_agent.config import get_settings
 from sre_agent.graph.nodes import SREAgentNodes
 from sre_agent.graph.state import create_initial_state
 from sre_agent.graph.workflow import build_workflow
+from sre_agent.incident_index import create_incident_index
 from sre_agent.integrations.normalizers import normalize, to_incident
 from sre_agent.observability import configure_telemetry, log_step
 from sre_agent.stores import create_alert_ledger, create_pending_approval_store
@@ -42,11 +43,15 @@ class SREAgentService:
         checkpointer=None,
         alert_ledger=None,
         pending_approvals=None,
+        incident_index=None,
     ) -> None:
         configure_telemetry()  # idempotent; every trigger surface passes here
         self.graph = build_workflow(nodes=nodes, checkpointer=checkpointer)
         self.alert_ledger = alert_ledger or create_alert_ledger()
         self.pending_approvals = pending_approvals or create_pending_approval_store()
+        # Queryable list-all-incidents surface for the monitoring UI. Mirrors
+        # pending_approvals: sync upserts at the intake/approval chokepoints.
+        self.incident_index = incident_index or create_incident_index()
 
     def register_alert(
         self, payload: Dict[str, Any], source_hint: str = ""
@@ -81,6 +86,7 @@ class SREAgentService:
                 alert_id=alert.alert_id, previous_incident=claim.incident_id,
                 level=logging.WARNING,
             )
+            self._index_intake(incident, alert, "received")
             return {"action": "investigate", "incident": incident, "alert": alert}
 
         if claim.status == "duplicate":
@@ -119,7 +125,44 @@ class SREAgentService:
             alert_id=alert.alert_id, service_name=incident.service_name,
             source=alert.source.value, environment=incident.environment,
         )
+        self._index_intake(incident, alert, "received")
         return {"action": "investigate", "incident": incident, "alert": alert}
+
+    def _index_intake(self, incident, alert, status: str) -> None:
+        """Upsert the descriptive index row at intake (best-effort).
+
+        The index is a UI convenience surface, never on the investigation's
+        critical path — a failure here must not drop an alert.
+        """
+        try:
+            self.incident_index.upsert(
+                incident.incident_id,
+                app_code=incident.app_code,
+                service_name=incident.service_name,
+                severity=getattr(incident.severity, "value", incident.severity),
+                environment=incident.environment,
+                title=alert.title,
+                status=status,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to upsert incident index for %s", incident.incident_id)
+
+    def _index_status(self, incident_id: str, **fields_: Any) -> None:
+        """Upsert terminal/awaiting-approval status onto the index row."""
+        try:
+            self.incident_index.upsert(incident_id, **fields_)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to upsert incident index for %s", incident_id)
+
+    def _index_terminal(self, incident_id: str, view: Dict[str, Any]) -> None:
+        """Upsert the resolved/terminal state from a final view."""
+        self._index_status(
+            incident_id,
+            status=view.get("status"),
+            awaiting_approval=False,
+            ticket_id=view.get("ticket_id"),
+            resolution_summary=view.get("resolution_summary"),
+        )
 
     async def run_registered(self, registration: Dict[str, Any]) -> Dict[str, Any]:
         """Phase 2 of intake: run the investigation for a claimed alert."""
@@ -143,6 +186,10 @@ class SREAgentService:
                 "approval_request", "pending", incident.incident_id,
                 actions=len(request.get("actions", [])),
             )
+            self._index_status(
+                incident.incident_id,
+                status="awaiting_approval", awaiting_approval=True,
+            )
             return {
                 "incident_id": incident.incident_id,
                 "status": "awaiting_approval",
@@ -150,7 +197,9 @@ class SREAgentService:
             }
 
         self.alert_ledger.mark_processed(alert.alert_id)
-        return self._final_view(incident.incident_id, state)
+        view = self._final_view(incident.incident_id, state)
+        self._index_terminal(incident.incident_id, view)
+        return view
 
     async def handle_alert(
         self, payload: Dict[str, Any], source_hint: str = ""
@@ -238,7 +287,9 @@ class SREAgentService:
             config,
         )
         self.pending_approvals.remove(incident_id)
-        return self._final_view(incident_id, state)
+        view = self._final_view(incident_id, state)
+        self._index_terminal(incident_id, view)
+        return view
 
     async def sweep_expired_approvals(self) -> List[Dict[str, Any]]:
         """Escalate investigations that outlived the approval timeout.

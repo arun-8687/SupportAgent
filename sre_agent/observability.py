@@ -20,12 +20,33 @@ stdlib logging — offline dev and tests need no Azure.
 """
 import logging
 import os
+import time
 from contextlib import contextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("sre_agent.telemetry")
 
 _configured: Optional[bool] = None
+
+# Extra durable sinks for step records (e.g. the monitoring-UI step-event
+# writer). Empty by default, so non-UI deploys and tests are unaffected and
+# the hot path reads no settings — it only checks this list.
+_sinks: List[Callable[[Dict[str, Any]], None]] = []
+
+
+def register_step_sink(sink: Callable[[Dict[str, Any]], None]) -> None:
+    """Register a durable sink to receive every step record (best-effort)."""
+    if sink not in _sinks:
+        _sinks.append(sink)
+
+
+def unregister_step_sink(sink: Callable[[Dict[str, Any]], None]) -> None:
+    if sink in _sinks:
+        _sinks.remove(sink)
+
+
+def clear_step_sinks() -> None:
+    _sinks.clear()
 
 
 def configure_telemetry() -> bool:
@@ -126,3 +147,20 @@ def log_step(
         " ".join(f"{k}={v}" for k, v in fields.items() if v is not None),
         extra=dimensions,
     )
+
+    # Durable sinks (monitoring UI). Best-effort and non-blocking: a sink
+    # only enqueues; it must never raise into the hot path.
+    if _sinks:
+        record = {
+            "step": step,
+            "status": status,
+            "incident_id": incident_id or "",
+            "duration_ms": duration_ms,
+            "ts": time.time(),
+            "fields": {k: v for k, v in fields.items() if v is not None},
+        }
+        for sink in _sinks:
+            try:
+                sink(record)
+            except Exception:  # pragma: no cover - defensive
+                pass
