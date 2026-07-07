@@ -379,10 +379,15 @@ def _mount_spa(app: FastAPI, dist_dir: Optional[Path]) -> None:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="spa-assets")
 
+    dist_root = dist.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        # A real file at the SPA root (favicon.ico, manifest.json, ...).
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
+        # A real file at the SPA root (favicon.ico, manifest.json, ...). Resolve
+        # and confirm containment first: `full_path` is attacker-controlled and
+        # Starlette does not strip `..`, so `dist / full_path` could otherwise
+        # escape the SPA dir and serve arbitrary files (secrets, /proc, ...).
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(dist_root):
             return FileResponse(candidate)
         return FileResponse(index_file)
