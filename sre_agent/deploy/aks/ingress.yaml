@@ -1,0 +1,35 @@
+# Public entrypoint. All traffic goes through oauth2-proxy (which then proxies
+# to the API), so the ingress backend is the oauth2-proxy Service, NOT the API
+# directly — that guarantees every request is authenticated before it reaches
+# the app. TLS via cert-manager (adjust to your issuer / managed cert).
+#
+# Prereq: an ingress controller (e.g. `az aks approuting enable`, or install
+# ingress-nginx).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sre-agent
+  namespace: sre-agent
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"   # room for auth cookies
+    # SSE needs unbuffered, long-lived responses.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - <HOST>
+      secretName: sre-agent-tls
+  rules:
+    - host: <HOST>
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180

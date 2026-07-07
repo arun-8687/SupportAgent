@@ -1,0 +1,20 @@
+# Shared durable state for knowledge/memory files (data_dir). ReadWriteMany so
+# every worker + API replica sees the same files. Azure Files backs it.
+#
+# NOTE: prefer the NFS variant of Azure Files, not SMB — the stores use fcntl
+# advisory locks (locking.py), which are unreliable over SMB. With
+# SRE_AGENT_DATABASE_URL set (production), the alert ledger, pending approvals,
+# incident index, and step events all use Postgres, so this mount only holds
+# the knowledge base / memory files; still, NFS avoids surprises.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sre-agent-data
+  namespace: sre-agent
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: azurefile-csi   # or a custom NFS azurefile StorageClass
+  resources:
+    requests:
+      storage: 10Gi

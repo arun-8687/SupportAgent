@@ -1,0 +1,27 @@
+# Apply everything with:  kubectl apply -k sre_agent/deploy/aks
+#
+# Set the image once here (kustomize rewrites every <ACR_LOGIN_SERVER>/sre-agent
+# reference). Replace the remaining <PLACEHOLDER> tokens in the manifests (or
+# layer a kustomize overlay / envsubst) before applying — see README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sre-agent
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secretproviderclass.yaml
+  - data-pvc.yaml
+  - worker-deployment.yaml
+  - worker-scaledobject.yaml
+  - api-deployment.yaml
+  - oauth2-proxy.yaml
+  - ingress.yaml
+  - maintenance-cronjob.yaml
+
+images:
+  - name: <ACR_LOGIN_SERVER>/sre-agent
+    newName: <ACR_LOGIN_SERVER>/sre-agent   # e.g. myregistry.azurecr.io/sre-agent
+    newTag: "<TAG>"                          # e.g. 1.0.0 or a commit SHA

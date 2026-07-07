@@ -1,5 +1,10 @@
 # Deployment guide — SRE Agent on Azure Functions
 
+> **Running on Kubernetes instead?** See [`aks/README.md`](aks/README.md) for
+> the AKS topology (listener worker + KEDA autoscaling, the API behind
+> oauth2-proxy, Key Vault CSI + Workload Identity). Same application code;
+> this Functions/App Service guide and the AKS guide are alternatives.
+
 Step-by-step provisioning and deployment for the production topology:
 
 ```mermaid

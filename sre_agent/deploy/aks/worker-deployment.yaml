@@ -1,0 +1,68 @@
+# The worker: the always-on Service Bus topic listener (replaces the Azure
+# Functions trigger). It claims alerts, runs the LangGraph investigation,
+# pauses for approval, and sweeps timed-out approvals + stalled intakes +
+# retention inline. KEDA scales replicas on subscription depth (see
+# worker-scaledobject.yaml); replicas coordinate through Postgres + the
+# alert ledger, so scaling out is safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-agent-worker
+  namespace: sre-agent
+  labels:
+    app.kubernetes.io/name: sre-agent
+    app.kubernetes.io/component: worker
+spec:
+  # Replica count is owned by KEDA; keep 1 here as the pre-scale baseline.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sre-agent
+        app.kubernetes.io/component: worker
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: sre-agent
+      containers:
+        - name: worker
+          image: <ACR_LOGIN_SERVER>/sre-agent:<TAG>
+          command: ["python", "-m", "sre_agent.main", "listen"]
+          envFrom:
+            - configMapRef:
+                name: sre-agent-config
+            - secretRef:
+                name: sre-agent-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: kv
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          # A crashed listener is replaced by the Deployment; a wedged one is
+          # caught by this liveness check (the module import + settings load).
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sre_agent.service"]
+            initialDelaySeconds: 20
+            periodSeconds: 60
+            timeoutSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: sre-agent-data
+        - name: kv
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: sre-agent-kv

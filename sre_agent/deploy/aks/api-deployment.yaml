@@ -1,0 +1,87 @@
+# The web API + SPA (uvicorn). Reads the shared Postgres state; never runs the
+# workflow. Fronted by oauth2-proxy (oauth2-proxy.yaml), which forwards the
+# Entra token; SRE_AGENT_WEBAPI_AUTH_MODE=bearer makes auth.py read it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-agent-api
+  namespace: sre-agent
+  labels:
+    app.kubernetes.io/name: sre-agent
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sre-agent
+        app.kubernetes.io/component: api
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: sre-agent
+      containers:
+        - name: api
+          image: <ACR_LOGIN_SERVER>/sre-agent:<TAG>
+          # Image CMD is uvicorn already; kept explicit for clarity.
+          command: ["uvicorn", "sre_agent.webapi.main:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: sre-agent-config
+            - secretRef:
+                name: sre-agent-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: kv
+              mountPath: /mnt/secrets-store
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: sre-agent-data
+        - name: kv
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: sre-agent-kv
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-agent-api
+  namespace: sre-agent
+  labels:
+    app.kubernetes.io/name: sre-agent
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -150,6 +150,23 @@ class SREAgentSettings(BaseSettings):
     db_pool_min: int = 1
     db_pool_max: int = 10
 
+    # --- Web API auth source ---
+    # How the verified caller identity reaches the API:
+    #   "easyauth" — App Service / ASE injects X-MS-CLIENT-PRINCIPAL.
+    #   "bearer"   — a reverse proxy (oauth2-proxy on AKS/ingress) forwards
+    #                the Entra token as Authorization: Bearer / an
+    #                X-Forwarded-Access-Token header.
+    #   "auto"     — try Easy Auth first, then a forwarded bearer token.
+    webapi_auth_mode: str = "auto"
+    # Defense-in-depth JWT signature verification for the bearer path. Off by
+    # default because oauth2-proxy already validates the token upstream and
+    # the API is only reachable through it; turn on (with the JWKS/issuer/
+    # audience below) when the API could receive tokens from elsewhere.
+    webapi_jwt_verify: bool = False
+    webapi_jwt_jwks_url: Optional[str] = None   # e.g. https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys
+    webapi_jwt_issuer: Optional[str] = None
+    webapi_jwt_audience: Optional[str] = None
+
     # Explicit override for mock/synthetic data fallbacks. Defaults to
     # allowed outside production, forbidden in production.
     allow_mock_data: Optional[bool] = None

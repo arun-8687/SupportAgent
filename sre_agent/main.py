@@ -62,6 +62,11 @@ def main() -> None:
 
     sub.add_parser("graph", help="Print the workflow graph as mermaid")
 
+    sub.add_parser(
+        "maintain",
+        help="Run retention (checkpoint prune + step-event partition drop) once",
+    )
+
     args = parser.parse_args()
 
     if args.command == "listen":
@@ -72,6 +77,10 @@ def main() -> None:
         asyncio.run(_simulate(args.alert_file, args.approve))
     elif args.command == "graph":
         _print_graph()
+    elif args.command == "maintain":
+        from sre_agent.maintenance import run_maintenance
+
+        logging.info("Maintenance summary: %s", run_maintenance())
     else:  # pragma: no cover
         parser.print_help()
         sys.exit(1)

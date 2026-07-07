@@ -1,0 +1,31 @@
+# Non-secret runtime config shared by the worker and API. Secrets (DB URL,
+# Service Bus connection string, OpenAI key, App Insights) come from Key Vault
+# via secretproviderclass.yaml, NOT from here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sre-agent-config
+  namespace: sre-agent
+data:
+  SRE_AGENT_ENVIRONMENT: "production"
+  # Durable step timeline for the monitoring UI (both worker and API).
+  SRE_AGENT_PERSIST_STEP_EVENTS: "true"
+  SRE_AGENT_STEP_EVENT_RETENTION_DAYS: "30"
+  # Service Bus topic/subscription (KEDA also reads these — keep in sync).
+  SRE_AGENT_SERVICEBUS_TOPIC: "sre-incidents"
+  SRE_AGENT_SERVICEBUS_SUBSCRIPTION: "sre-agent"
+  # Shared state lives on the Azure Files mount + Postgres.
+  SRE_AGENT_DATA_DIR: "/data"
+  # The API is fronted by oauth2-proxy, which forwards the Entra token.
+  SRE_AGENT_WEBAPI_AUTH_MODE: "bearer"
+  # Turn on in-app JWT signature verification for defense-in-depth (optional;
+  # oauth2-proxy already validates). If enabled, also set the JWKS/issuer/aud:
+  SRE_AGENT_WEBAPI_JWT_VERIFY: "false"
+  # SRE_AGENT_WEBAPI_JWT_JWKS_URL: "https://login.microsoftonline.com/<TENANT_ID>/discovery/v2.0/keys"
+  # SRE_AGENT_WEBAPI_JWT_ISSUER: "https://login.microsoftonline.com/<TENANT_ID>/v2.0"
+  # SRE_AGENT_WEBAPI_JWT_AUDIENCE: "<API_APP_CLIENT_ID>"
+  # Semantic knowledge retrieval (pgvector) once embeddings are configured.
+  SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND: "auto"
+  SRE_AGENT_AZURE_OPENAI_ENDPOINT: "https://<AOAI_RESOURCE>.openai.azure.com"
+  SRE_AGENT_AZURE_OPENAI_DEPLOYMENT: "gpt-5.1-codex"
+  SRE_AGENT_DRY_RUN: "true"   # flip to false only with a privileged runner in place

@@ -1,0 +1,23 @@
+# Rebuilt inside the image
+frontend/node_modules
+frontend/dist
+node_modules
+
+# VCS / local
+.git
+.gitignore
+.github
+
+# Python caches / local state
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+data
+*.egg-info
+.venv
+venv
+
+# Tests and docs are not needed at runtime
+sre_agent/tests
+**/*.md

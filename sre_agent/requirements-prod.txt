@@ -1,0 +1,22 @@
+# Production dependency set for the container image (worker + web API).
+# Base deps plus the extras that are optional/commented in requirements.txt
+# but REQUIRED in a real Azure/AKS deployment.
+-r requirements.txt
+
+# Durable checkpointer + async read pool for the API. langgraph-checkpoint-
+# postgres brings psycopg; [pool] adds psycopg_pool (AsyncConnectionPool).
+langgraph-checkpoint-postgres>=2.0.0
+psycopg[binary,pool]>=3.1.0
+
+# Semantic knowledge retrieval (SRE_AGENT_KNOWLEDGE_VECTOR_BACKEND=pgvector).
+pgvector>=0.3.0
+
+# Export step logs/spans to App Insights (APPLICATIONINSIGHTS_CONNECTION_STRING).
+azure-monitor-opentelemetry>=1.6.0
+
+# ASGI server for the web API.
+uvicorn[standard]>=0.30.0
+
+# In-app JWT signature verification for the bearer/oauth2-proxy auth path
+# (only used when SRE_AGENT_WEBAPI_JWT_VERIFY=true).
+pyjwt[crypto]>=2.8.0

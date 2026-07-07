@@ -1,0 +1,37 @@
+# KEDA event-driven autoscaling on Service Bus subscription depth — this is
+# what Azure Functions did automatically. minReplicaCount is 1 (not 0) on
+# purpose: the listener runs the approval-timeout / stalled-intake sweep
+# inline every 5 min, so at least one pod must stay up even with no traffic.
+# (Retention still also runs from the maintenance CronJob.)
+#
+# Prereq: install KEDA (e.g. `az aks update --enable-keda -g $RG -n $AKS`).
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: sre-servicebus-auth
+  namespace: sre-agent
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: sre-agent-secrets
+      key: SRE_AGENT_SERVICEBUS_CONNECTION_STRING
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sre-agent-worker
+  namespace: sre-agent
+spec:
+  scaleTargetRef:
+    name: sre-agent-worker
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  triggers:
+    - type: azure-servicebus
+      metadata:
+        topicName: sre-incidents
+        subscriptionName: sre-agent
+        messageCount: "5"        # target messages-per-replica before scaling up
+      authenticationRef:
+        name: sre-servicebus-auth
