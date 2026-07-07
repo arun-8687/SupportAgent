@@ -1,0 +1,28 @@
+# Restrict who can reach the API pods. The API trusts the Entra token that
+# oauth2-proxy forwards (and, unless SRE_AGENT_WEBAPI_JWT_VERIFY=true, does not
+# re-verify its signature), so nothing except oauth2-proxy must be able to
+# reach it — otherwise an in-cluster actor could hit the ClusterIP Service
+# directly with a self-minted token and bypass authentication.
+#
+# Requires a NetworkPolicy-capable CNI (Azure CNI with Calico/Cilium, or
+# `--network-policy calico` at cluster create). Kubelet liveness/readiness
+# probes originate from the node and are not blocked by this policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sre-agent-api-allow-oauth2-proxy
+  namespace: sre-agent
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: oauth2-proxy
+      ports:
+        - protocol: TCP
+          port: 8080

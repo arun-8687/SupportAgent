@@ -31,9 +31,19 @@ Easy Auth is App-Service-only. On AKS, **oauth2-proxy** (reverse-proxy mode)
 terminates the Entra OIDC login and forwards the ID token as
 `Authorization: Bearer`. The API reads the SAME `roles` + identity claims it
 read from Easy Auth — set `SRE_AGENT_WEBAPI_AUTH_MODE=bearer`. RBAC
-(`SRE.Viewer` / `SRE.Approver`) is unchanged. Optionally enable in-app JWT
-signature verification (`SRE_AGENT_WEBAPI_JWT_VERIFY=true` + the JWKS / issuer
-/ audience settings) for defense-in-depth on top of oauth2-proxy's validation.
+(`SRE.Viewer` / `SRE.Approver`) is unchanged.
+
+Because the API **trusts** that forwarded token (it does not re-verify the
+signature by default), two controls keep that trust boundary sound and you
+should keep BOTH:
+
+- `networkpolicy.yaml` restricts ingress to the API pods to **oauth2-proxy
+  only**, so nothing in the cluster can reach the API directly and present a
+  self-minted token. This needs a NetworkPolicy-capable CNI (Azure CNI +
+  Calico/Cilium).
+- Optionally also enable in-app JWT signature verification
+  (`SRE_AGENT_WEBAPI_JWT_VERIFY=true` + the JWKS / issuer / audience settings)
+  so the API independently validates the token even if it is reached directly.
 
 ## Prerequisites
 
@@ -119,6 +129,7 @@ exists for the UI.
 | `worker-scaledobject.yaml` | KEDA Service Bus autoscaling (min 1) |
 | `api-deployment.yaml` | the API + SPA, `/healthz` + `/readyz` probes |
 | `oauth2-proxy.yaml` | Entra login, forwards the token to the API |
+| `networkpolicy.yaml` | restricts API ingress to oauth2-proxy only (protects the trusted-token boundary) |
 | `ingress.yaml` | TLS entrypoint → oauth2-proxy → API |
 | `maintenance-cronjob.yaml` | hourly retention (`sre_agent.main maintain`) |
 | `kustomization.yaml` | ties it together; sets the image |

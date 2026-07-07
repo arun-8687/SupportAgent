@@ -236,3 +236,36 @@ def test_spa_deep_link_falls_back_to_index_html(service, incident_index, step_ev
             assert "spa shell" in r.text, path
         # API routes are unaffected by the catch-all.
         assert c.get("/api/incidents").status_code == 200
+
+
+@pytest.mark.integration
+def test_spa_fallback_blocks_path_traversal(service, incident_index, step_events, tmp_path):
+    """The SPA fallback must not serve files outside the dist dir. A secret
+    sits next to (but outside) dist; a traversal attempt must fall back to
+    index.html, never leak it."""
+    root = tmp_path / "root"
+    dist = root / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html><body>spa shell</body></html>")
+    secret = root / "secret.txt"
+    secret.write_text("TOP-SECRET-DB-URL")
+
+    from sre_agent.config import get_settings
+
+    settings = get_settings()
+    original = settings.webapi_spa_dist_dir
+    settings.webapi_spa_dist_dir = dist
+    try:
+        app = create_app(service=service, incident_index=incident_index, step_events=step_events)
+    finally:
+        settings.webapi_spa_dist_dir = original
+
+    with TestClient(app) as c:
+        # A legitimate asset under dist is still served.
+        (dist / "favicon.ico").write_text("icon-bytes")
+        assert c.get("/favicon.ico").text == "icon-bytes"
+        # Traversal attempts never leak the sibling secret; they fall through
+        # to the SPA shell. (raw_path avoids the client normalizing "..".)
+        for evil in ("/../secret.txt", "/..%2fsecret.txt", "/%2e%2e/secret.txt"):
+            r = c.get(evil)
+            assert "TOP-SECRET" not in r.text, evil

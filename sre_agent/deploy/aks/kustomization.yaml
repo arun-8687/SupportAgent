@@ -18,6 +18,7 @@ resources:
   - worker-scaledobject.yaml
   - api-deployment.yaml
   - oauth2-proxy.yaml
+  - networkpolicy.yaml
   - ingress.yaml
   - maintenance-cronjob.yaml
 
