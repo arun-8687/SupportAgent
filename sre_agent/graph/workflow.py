@@ -21,6 +21,7 @@ The SRE incident-response graph.
                                  │                                 │
                               resolve ── END              escalate ── END
 """
+import asyncio
 import logging
 import time
 from typing import Any, Callable, List, Optional, Union
@@ -123,12 +124,64 @@ def _serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=allowed)
 
 
+def _make_lazy_async_pg_saver_class():
+    """Build the LazyAsyncPostgresSaver subclass (deferred import).
+
+    The graph is always driven with async methods (`ainvoke` / `aget_state` /
+    `aupdate_state`), so the checkpointer MUST be an AsyncPostgresSaver — the
+    sync PostgresSaver's `aget_tuple` raises NotImplementedError. But an async
+    pool can only be opened inside a running event loop, while
+    `create_checkpointer()` is called synchronously (from `build_workflow`,
+    from a sync `__init__`, sometimes before any loop exists). This subclass
+    resolves that: it's constructed synchronously with a not-yet-open pool and
+    opens it on the first async call, in whatever loop is then running.
+    """
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    class LazyAsyncPostgresSaver(AsyncPostgresSaver):
+        def __init__(self, pool, serde=None):
+            super().__init__(pool, serde=serde)
+            self._pool_ref = pool
+            self._opened = False
+            self._open_lock = None
+
+        async def _ensure_open(self):
+            if self._opened:
+                return
+            if self._open_lock is None:
+                self._open_lock = asyncio.Lock()
+            async with self._open_lock:
+                if not self._opened:
+                    await self._pool_ref.open()
+                    self._opened = True
+
+        async def aget_tuple(self, config):
+            await self._ensure_open()
+            return await super().aget_tuple(config)
+
+        async def alist(self, *args, **kwargs):
+            await self._ensure_open()
+            async for item in super().alist(*args, **kwargs):
+                yield item
+
+        async def aput(self, *args, **kwargs):
+            await self._ensure_open()
+            return await super().aput(*args, **kwargs)
+
+        async def aput_writes(self, *args, **kwargs):
+            await self._ensure_open()
+            return await super().aput_writes(*args, **kwargs)
+
+    return LazyAsyncPostgresSaver
+
+
 def create_checkpointer():
     """
     Build the checkpointer the graph needs for interrupt/resume.
 
     - SRE_AGENT_DATABASE_URL set -> Postgres (durable: approvals survive
-      restarts and resume on any instance).
+      restarts and resume on any instance). Async saver, since the service
+      drives the graph asynchronously.
     - unset in development       -> MemorySaver (single-process only).
     - unset in production        -> hard failure. A silently non-durable
       checkpointer means paused approvals die on scale-in/restart.
@@ -136,19 +189,32 @@ def create_checkpointer():
     settings = get_settings()
     if settings.database_url:
         try:
+            import psycopg
             from langgraph.checkpoint.postgres import PostgresSaver
+            from psycopg.rows import dict_row
+            from psycopg_pool import AsyncConnectionPool
         except ImportError as exc:
             raise RuntimeError(
                 "SRE_AGENT_DATABASE_URL is set but langgraph-checkpoint-postgres "
                 "is not installed (pip install langgraph-checkpoint-postgres)."
             ) from exc
-        checkpointer = PostgresSaver.from_conn_string(settings.database_url)
-        # from_conn_string returns a context manager in recent versions;
-        # enter it eagerly for a long-lived saver.
-        if hasattr(checkpointer, "__enter__") and not hasattr(checkpointer, "get_tuple"):
-            checkpointer = checkpointer.__enter__()  # pragma: no cover
-        checkpointer.setup()
-        return checkpointer
+
+        # Create the checkpoint tables ONCE, synchronously — no event loop
+        # needed, and the async saver reuses the same schema. autocommit is
+        # required for setup()'s migration DDL.
+        with psycopg.connect(settings.database_url, autocommit=True) as setup_conn:
+            PostgresSaver(setup_conn).setup()
+
+        # Runtime: an async pool (opened lazily on first use) + async saver.
+        pool = AsyncConnectionPool(
+            settings.database_url,
+            open=False,
+            min_size=settings.db_pool_min,
+            max_size=settings.db_pool_max,
+            kwargs={"autocommit": True, "row_factory": dict_row},
+        )
+        lazy_cls = _make_lazy_async_pg_saver_class()
+        return lazy_cls(pool, serde=_serializer())
 
     if settings.is_production:
         raise RuntimeError(

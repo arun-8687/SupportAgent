@@ -170,10 +170,12 @@ class PostgresStepEventStore:
         year = start.year + (1 if start.month == 12 else 0)
         end = start.replace(year=year, month=month)
         name = f"sre_step_events_{start:%Y%m}"
+        # Partition bounds in a CREATE TABLE ... FOR VALUES clause are DDL and
+        # CANNOT be bound parameters — inline them as timestamptz literals.
+        # start/end are internally derived (first-of-month), so no injection.
         conn.execute(
             f"CREATE TABLE IF NOT EXISTS {name} PARTITION OF sre_step_events "
-            f"FOR VALUES FROM (%s) TO (%s)",
-            (start, end),
+            f"FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')"
         )
         conn.commit()
 
