@@ -91,16 +91,30 @@ az keyvault secret set --vault-name $KV -n oauth2-proxy-cookie-secret       --va
   the AD groups for your on-call and senior SRE teams.
 - Client id / secret go into Key Vault (step 2).
 
-## 4. Fill in the placeholders and apply
+## 4. Fill in the values and apply (turnkey)
 
-Replace the `<...>` tokens across the manifests (image set via
-`kustomization.yaml`; the rest — `<MANAGED_IDENTITY_CLIENT_ID>`,
-`<KEYVAULT_NAME>`, `<TENANT_ID>`, `<HOST>`, `<AOAI_RESOURCE>`,
-`<ACR_LOGIN_SERVER>`, `<TAG>` — with `envsubst` or a kustomize overlay), then:
+Put your identifiers in `deploy.env` and let `apply.sh` render every `<TOKEN>`
+placeholder, apply the manifests in dependency order, and smoke-check the
+result:
 
 ```bash
-kubectl apply -k sre_agent/deploy/aks
+cd sre_agent/deploy/aks
+cp deploy.env.example deploy.env && $EDITOR deploy.env   # ACR, tenant, host, ...
+
+./apply.sh render      # print the rendered manifests, apply nothing
+./apply.sh dry-run     # server-side --dry-run, apply nothing
+./apply.sh apply       # apply, wait for rollouts, then smoke-check
 ```
+
+`deploy.env` holds identifiers (not secrets — those live in Key Vault) and is
+gitignored. `apply.sh apply` waits for the oauth2-proxy / API / worker
+rollouts, confirms the Key Vault secret synced and KEDA is managing the worker,
+and port-forwards the API to check `/healthz` + `/readyz` (which reports
+`database:true` when Postgres is reachable).
+
+> Prefer kustomize? The manifests also work with
+> `kubectl apply -k sre_agent/deploy/aks` once you've substituted the tokens
+> yourself (set the image in `kustomization.yaml`).
 
 ## 5. Verify
 
@@ -133,6 +147,7 @@ exists for the UI.
 | `ingress.yaml` | TLS entrypoint → oauth2-proxy → API |
 | `maintenance-cronjob.yaml` | hourly retention (`sre_agent.main maintain`) |
 | `kustomization.yaml` | ties it together; sets the image |
+| `apply.sh` / `deploy.env.example` | turnkey: render placeholders → apply → smoke-check |
 
 ## Notes
 
