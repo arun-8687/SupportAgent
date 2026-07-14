@@ -97,13 +97,26 @@ flowchart LR
         T --> SUB
     end
 
-    subgraph Agent["SRE Agent"]
+    subgraph Worker["SRE Agent worker<br/>(Functions trigger / always-on listener)"]
         NORM[Normalizers]
         LEDGER[Alert ledger<br/>dedup + storm suppression]
         GRAPH[LangGraph<br/>incident workflow]
         GATE[Permission gate]
+    end
+
+    subgraph State["Shared state — Postgres"]
+        CKPT[(Checkpoints)]
+        INDEX[(Incident index)]
+        EVENTS[(Step-event timeline)]
         MEM[(Memory & knowledge)]
-        CKPT[(Postgres<br/>checkpoints)]
+    end
+
+    subgraph Console["Monitoring & action console<br/>(standalone service)"]
+        SPA[React SPA]
+        API[FastAPI web API]
+        AUTH[Entra auth + RBAC<br/>Viewer / Approver]
+        SPA --> API
+        AUTH -.-> API
     end
 
     subgraph Ext["Integrations"]
@@ -114,7 +127,7 @@ flowchart LR
         MCP[MCP servers<br/>Grafana, Prometheus, ...]
     end
 
-    HUMAN([On-call engineer])
+    OPS([SRE operators])
     RUNNER[Privileged runner<br/>az / kubectl]
 
     AM & PD & SN & CU --> T
@@ -124,13 +137,20 @@ flowchart LR
     GRAPH <--> GH
     GRAPH <--> MCP
     GRAPH --> TICKET
-    GRAPH <--> MEM
-    GRAPH <--> CKPT
     GRAPH --> GATE
-    GATE -->|approval request| HUMAN
-    HUMAN -->|approve / reject<br/>HTTP or topic message| GRAPH
+    GRAPH -->|writes| CKPT & INDEX & EVENTS & MEM
+
+    OPS --> SPA
+    API -->|list / detail / live timeline| INDEX & EVENTS & CKPT
+    API -->|approve / reject<br/>resumes the graph| GRAPH
     GRAPH -->|execution_request<br/>dispatch mode| OUT --> RUNNER
 ```
+
+The **worker** (Service Bus trigger or always-on listener) investigates and
+writes all state to Postgres; the separate **console** service reads that
+shared state to monitor runs and reads back the live timeline, and the one
+write action — approve/reject — resumes the paused graph. See
+[Monitoring & action console](#monitoring--action-console).
 
 ### Incident workflow graph
 
