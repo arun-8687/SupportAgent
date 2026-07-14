@@ -11,8 +11,9 @@ Step-by-step provisioning and deployment for the production topology:
 flowchart LR
     subgraph RG["Resource group"]
         SB["Service Bus namespace<br/>topics: sre-incidents, sre-agent-events"]
-        FA["Function App<br/>Elastic Premium EP1, Python 3.11"]
-        PG[("PostgreSQL Flexible Server<br/>checkpoints + ledger + approvals")]
+        FA["Function App (worker)<br/>Elastic Premium EP1, Python 3.11"]
+        API["Console App Service<br/>FastAPI + SPA, Always On<br/>(Entra Easy Auth)"]
+        PG[("PostgreSQL Flexible Server<br/>checkpoints + ledger + approvals<br/>+ incident index + step events")]
         SA["Storage account<br/>Functions host + Azure Files share"]
         AOAI["Azure OpenAI<br/>chat deployment"]
         AI["Application Insights"]
@@ -23,8 +24,14 @@ flowchart LR
     FA <--> AOAI
     FA -->|"/mounts/sre-data"| SA
     FA --> AI
-    ONCALL([On-call engineer]) -->|"POST /api/incidents/{id}/approval<br/>(Entra Easy Auth)"| FA
+    API --> AI
+    API -->|"reads: list / detail / timeline<br/>approve resumes the paused graph"| PG
+    OPS([SRE operators]) -->|"monitor + approve/reject<br/>(SRE.Viewer / SRE.Approver)"| API
 ```
+
+The **Function App** is the worker (Service Bus trigger); the separate **Console
+App Service** (§13) reads the shared Postgres state to monitor runs and act on
+approvals. Both run against the same database.
 
 > **Plan choice**: this guide uses **Elastic Premium (EP1)** because it
 > supports long executions, pre-warmed instances, and Azure Files mounts
