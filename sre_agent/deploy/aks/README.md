@@ -4,6 +4,39 @@ This is the Kubernetes deployment — an alternative to the Azure Functions /
 App Service surface in [`../README.md`](../README.md). Same application code,
 different platform. Use this when your org standardizes on AKS.
 
+```mermaid
+flowchart TB
+    OPS([SRE operators])
+    subgraph AKS["AKS cluster — namespace: sre-agent"]
+        ING[Ingress + TLS]
+        O2P["oauth2-proxy<br/>Entra OIDC login"]
+        API["API Deployment<br/>FastAPI + SPA"]
+        NP["NetworkPolicy<br/>API ⟵ oauth2-proxy only"]
+        WORK["Worker Deployment<br/>always-on listener"]
+        KEDA["KEDA ScaledObject"]
+        CRON["Maintenance CronJob<br/>retention"]
+    end
+    SB[("Service Bus<br/>sre-incidents")]
+    PG[("Postgres<br/>checkpoints + index + step events")]
+    KV["Key Vault<br/>(CSI + Workload Identity)"]
+    AOAI["Azure OpenAI"]
+
+    OPS -->|HTTPS| ING --> O2P -->|"forwards Entra token<br/>(bearer)"| API
+    NP -.guards.-> API
+    API -->|reads / approve-resume| PG
+    SB --> WORK
+    KEDA -.scales on queue depth.-> WORK
+    WORK -->|writes| PG
+    WORK <--> AOAI
+    CRON -->|drops old partitions| PG
+    KV -.secrets.-> API & WORK & O2P
+```
+
+Operators reach the console only through **oauth2-proxy** (enforced by the
+NetworkPolicy); the **worker** consumes Service Bus and writes state to
+Postgres, which the **API** reads back. KEDA scales the worker on subscription
+depth. Secrets come from Key Vault via the CSI driver and Workload Identity.
+
 ## Why it maps cleanly
 
 The worker was already a plain long-running process (the Service Bus
